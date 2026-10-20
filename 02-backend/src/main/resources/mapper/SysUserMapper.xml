@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.common.SysUserMapper">
+
+    <sql id="baseColumns">
+        id, job_no, name, phone, email, password, company, user_type, region, region_code, status, audit_status,
+        is_deleted, create_time, update_time
+    </sql>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.common.SysUser">
+        SELECT <include refid="baseColumns"/>
+        FROM sys_user
+        WHERE id = #{id} AND is_deleted = 0
+    </select>
+
+    <select id="selectByJobNo" resultType="org.tjetc.backend.entity.common.SysUser">
+        SELECT <include refid="baseColumns"/>
+        FROM sys_user
+        WHERE job_no = #{jobNo} AND is_deleted = 0
+    </select>
+
+    <!-- 手机号/工号共用登录定位：job_no 或 phone 命中其一即可 -->
+    <select id="selectByLoginAccount" resultType="org.tjetc.backend.entity.common.SysUser">
+        SELECT <include refid="baseColumns"/>
+        FROM sys_user
+        WHERE (job_no = #{account} OR phone = #{account}) AND is_deleted = 0
+    </select>
+
+    <select id="countByJobNo" resultType="int">
+        SELECT COUNT(1) FROM sys_user WHERE job_no = #{jobNo} AND is_deleted = 0
+    </select>
+
+    <select id="countByPhone" resultType="int">
+        SELECT COUNT(1) FROM sys_user WHERE phone = #{phone} AND is_deleted = 0
+    </select>
+
+    <select id="countByEmail" resultType="int">
+        SELECT COUNT(1) FROM sys_user WHERE email = #{email} AND is_deleted = 0
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.SysUser" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_user (job_no, name, phone, email, password, company, user_type, region, region_code, status, audit_status, is_deleted)
+        VALUES (#{jobNo}, #{name}, #{phone}, #{email}, #{password}, #{company}, #{userType}, #{region}, #{regionCode}, #{status}, #{auditStatus}, 0)
+    </insert>
+
+    <update id="updatePassword" parameterType="org.tjetc.backend.entity.common.SysUser">
+        UPDATE sys_user SET password = #{password} WHERE id = #{id}
+    </update>
+
+    <!-- 改密/重置密码：密码哈希更新 + 版本原子递增（DB 事实源），拦截器据此踢出旧 Token -->
+    <update id="updatePasswordWithVersion">
+        UPDATE sys_user SET password = #{password}, pwd_version = pwd_version + 1 WHERE id = #{id}
+    </update>
+
+    <select id="selectPwdVersion" resultType="java.lang.Integer">
+        SELECT pwd_version FROM sys_user WHERE id = #{id}
+    </select>
+
+    <!-- 账号审核结果同步用户表（API 5.4/5.5）：审核通过后账号即刻生效可登录 -->
+    <update id="updateAuditStatus">
+        UPDATE sys_user SET audit_status = #{auditStatus}, update_time = NOW() WHERE id = #{userId}
+    </update>
+
+    <select id="selectEnabledByUserType" resultType="org.tjetc.backend.entity.common.SysUser">
+        SELECT <include refid="baseColumns"/>
+        FROM sys_user
+        WHERE user_type = #{userType} AND status = 'ENABLED' AND audit_status = 'APPROVED' AND is_deleted = 0
+    </select>
+
+    <!-- ==================== 用户账号管理（API 5.2/5.6/5.9） ==================== -->
+
+    <select id="selectPage" resultType="map">
+        SELECT id, job_no, name, phone, company, user_type, region, region_code, status, audit_status, create_time
+        FROM sys_user
+        WHERE is_deleted = 0 AND user_type != 'ADMIN'
+        <if test="name != null and name != ''">AND name LIKE CONCAT('%', #{name}, '%')</if>
+        <if test="jobNo != null and jobNo != ''">AND job_no = #{jobNo}</if>
+        <if test="userType != null and userType != ''">AND user_type = #{userType}</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        ORDER BY id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM sys_user
+        WHERE is_deleted = 0 AND user_type != 'ADMIN'
+        <if test="name != null and name != ''">AND name LIKE CONCAT('%', #{name}, '%')</if>
+        <if test="jobNo != null and jobNo != ''">AND job_no = #{jobNo}</if>
+        <if test="userType != null and userType != ''">AND user_type = #{userType}</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+    </select>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.common.SysUser">
+        UPDATE sys_user
+        SET name = #{name},
+            company = #{company},
+            user_type = #{userType},
+            region = #{region},
+            region_code = #{regionCode},
+            phone = #{phone},
+            update_time = NOW()
+        WHERE id = #{id} AND is_deleted = 0
+    </update>
+
+    <update id="updateStatus">
+        UPDATE sys_user SET status = #{status}, update_time = NOW()
+        WHERE id = #{userId} AND is_deleted = 0
+    </update>
+
+    <update id="logicalDelete">
+        UPDATE sys_user SET is_deleted = 1, update_time = NOW()
+        WHERE id = #{id} AND is_deleted = 0
+    </update>
+
+</mapper>

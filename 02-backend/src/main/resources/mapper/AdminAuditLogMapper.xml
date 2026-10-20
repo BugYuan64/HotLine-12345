@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 审计日志：仅 INSERT，禁止 UPDATE/DELETE（安全红线） -->
+<mapper namespace="org.tjetc.backend.mapper.admin.AdminAuditLogMapper">
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.SysAuditLog" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO admin_audit_log (log_type, operator, module, content_type, summary, confidence, decision_basis, model, target_type)
+        VALUES (#{logType}, #{operator}, #{module}, #{contentType}, #{summary}, #{confidence}, #{decisionBasis}, #{model}, #{targetType})
+    </insert>
+
+    <!-- 按模块统计操作审计数量（分类准确率统计用）：三端审计日志 UNION 全局口径，
+         管理端统计功能跨端只读聚合（与拆分前三表混合时口径一致） -->
+    <select id="countOperationByModule" resultType="long">
+        SELECT
+          (SELECT COUNT(1) FROM admin_audit_log
+            WHERE log_type = 'OPERATION' AND module = #{module} AND create_time >= #{start})
+        + (SELECT COUNT(1) FROM dept_audit_log
+            WHERE log_type = 'OPERATION' AND module = #{module} AND create_time >= #{start})
+        + (SELECT COUNT(1) FROM street_audit_log
+            WHERE log_type = 'OPERATION' AND module = #{module} AND create_time >= #{start})
+    </select>
+
+    <!-- 管理端系统审计查询（API 8.6，仅 SELECT，日志不可删除/修改）：
+         收到工单类日志已按端归入 dept_audit_log/street_audit_log，本表仅管理端操作 -->
+    <select id="selectPage" resultType="map">
+        SELECT id, log_type, operator, module, content_type, summary, confidence,
+               decision_basis, model, target_type, create_time
+        FROM admin_audit_log
+        <where>
+            <if test="logType != null and logType != ''">AND log_type = #{logType}</if>
+            <if test="operator != null and operator != ''">AND operator LIKE CONCAT('%', #{operator}, '%')</if>
+            <if test="module != null and module != ''">AND module LIKE CONCAT('%', #{module}, '%')</if>
+            <if test="id != null">AND id = #{id}</if>
+            <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+            <if test="excludeModule != null">AND (module IS NULL OR module != #{excludeModule})</if>
+            <if test="appealKeyword != null and appealKeyword != ''">
+                AND (
+                    summary LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR decision_basis LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR operator LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR module LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR content_type LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR log_type LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR EXISTS (SELECT 1 FROM appeal_parent p
+                        WHERE (p.title LIKE CONCAT('%', #{appealKeyword}, '%') OR p.content LIKE CONCAT('%', #{appealKeyword}, '%'))
+                          AND LOCATE(p.appeal_no, summary) &gt; 0)
+                    OR EXISTS (SELECT 1 FROM appeal_child c
+                        WHERE (c.title LIKE CONCAT('%', #{appealKeyword}, '%') OR c.content LIKE CONCAT('%', #{appealKeyword}, '%'))
+                          AND LOCATE(c.appeal_no, summary) &gt; 0)
+                    OR EXISTS (SELECT 1 FROM admin_work_order wo
+                        JOIN appeal_child c ON c.id = wo.source_appeal_id
+                        LEFT JOIN appeal_parent p ON p.id = c.parent_id
+                        WHERE (c.title LIKE CONCAT('%', #{appealKeyword}, '%') OR c.content LIKE CONCAT('%', #{appealKeyword}, '%')
+                               OR p.title LIKE CONCAT('%', #{appealKeyword}, '%') OR p.content LIKE CONCAT('%', #{appealKeyword}, '%')
+                               OR EXISTS (SELECT 1 FROM work_order_appeal wa JOIN appeal_child c2 ON c2.id = wa.appeal_id
+                                   WHERE wa.order_id = wo.id AND (c2.title LIKE CONCAT('%', #{appealKeyword}, '%') OR c2.content LIKE CONCAT('%', #{appealKeyword}, '%'))))
+                          AND LOCATE(wo.order_no, summary) &gt; 0)
+                )
+            </if>
+        </where>
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_audit_log
+        <where>
+            <if test="logType != null and logType != ''">AND log_type = #{logType}</if>
+            <if test="operator != null and operator != ''">AND operator LIKE CONCAT('%', #{operator}, '%')</if>
+            <if test="module != null and module != ''">AND module LIKE CONCAT('%', #{module}, '%')</if>
+            <if test="id != null">AND id = #{id}</if>
+            <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+            <if test="excludeModule != null">AND (module IS NULL OR module != #{excludeModule})</if>
+            <if test="appealKeyword != null and appealKeyword != ''">
+                AND (
+                    summary LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR decision_basis LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR operator LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR module LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR content_type LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR log_type LIKE CONCAT('%', #{appealKeyword}, '%')
+                    OR EXISTS (SELECT 1 FROM appeal_parent p
+                        WHERE (p.title LIKE CONCAT('%', #{appealKeyword}, '%') OR p.content LIKE CONCAT('%', #{appealKeyword}, '%'))
+                          AND LOCATE(p.appeal_no, summary) &gt; 0)
+                    OR EXISTS (SELECT 1 FROM appeal_child c
+                        WHERE (c.title LIKE CONCAT('%', #{appealKeyword}, '%') OR c.content LIKE CONCAT('%', #{appealKeyword}, '%'))
+                          AND LOCATE(c.appeal_no, summary) &gt; 0)
+                    OR EXISTS (SELECT 1 FROM admin_work_order wo
+                        JOIN appeal_child c ON c.id = wo.source_appeal_id
+                        LEFT JOIN appeal_parent p ON p.id = c.parent_id
+                        WHERE (c.title LIKE CONCAT('%', #{appealKeyword}, '%') OR c.content LIKE CONCAT('%', #{appealKeyword}, '%')
+                               OR p.title LIKE CONCAT('%', #{appealKeyword}, '%') OR p.content LIKE CONCAT('%', #{appealKeyword}, '%')
+                               OR EXISTS (SELECT 1 FROM work_order_appeal wa JOIN appeal_child c2 ON c2.id = wa.appeal_id
+                                   WHERE wa.order_id = wo.id AND (c2.title LIKE CONCAT('%', #{appealKeyword}, '%') OR c2.content LIKE CONCAT('%', #{appealKeyword}, '%'))))
+                          AND LOCATE(wo.order_no, summary) &gt; 0)
+                )
+            </if>
+        </where>
+    </select>
+</mapper>

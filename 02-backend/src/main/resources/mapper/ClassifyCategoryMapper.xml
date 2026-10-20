@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.ClassifyCategoryMapper">
+
+    <sql id="baseColumns">
+        id, primary_category, sub_label, sort_order
+    </sql>
+
+    <select id="selectAll" resultType="org.tjetc.backend.entity.admin.ClassifyCategory">
+        SELECT <include refid="baseColumns"/>
+        FROM classify_category
+        ORDER BY primary_category, sort_order, id
+    </select>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.admin.ClassifyCategory">
+        SELECT <include refid="baseColumns"/>
+        FROM classify_category
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByPrimaryAndLabel" resultType="org.tjetc.backend.entity.admin.ClassifyCategory">
+        SELECT <include refid="baseColumns"/>
+        FROM classify_category
+        WHERE primary_category = #{primaryCategory} AND sub_label = #{subLabel}
+        LIMIT 1
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.ClassifyCategory" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO classify_category (primary_category, sub_label, sort_order)
+        VALUES (#{primaryCategory}, #{subLabel}, #{sortOrder})
+    </insert>
+
+</mapper>

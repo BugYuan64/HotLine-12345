@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.citizen.OrderEvaluateMapper">
+
+    <sql id="baseColumns">
+        id, order_id, appeal_no, citizen_phone, score, label, remark,
+        is_reopen_applied, reopen_reason, reopen_status, reopen_approve_time,
+        reopen_approve_remark, evaluate_time, create_time
+    </sql>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.citizen.OrderEvaluate" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO order_evaluate (order_id, appeal_no, citizen_phone, score, label, remark,
+                                    is_reopen_applied, reopen_reason, reopen_status, evaluate_time)
+        VALUES (#{orderId}, #{appealNo}, #{citizenPhone}, #{score}, #{label}, #{remark},
+                #{isReopenApplied}, #{reopenReason}, #{reopenStatus}, #{evaluateTime})
+    </insert>
+
+    <select id="selectByOrderId" resultType="org.tjetc.backend.entity.citizen.OrderEvaluate">
+        SELECT <include refid="baseColumns"/>
+        FROM order_evaluate
+        WHERE order_id = #{orderId}
+        LIMIT 1
+    </select>
+
+    <update id="updateReopenApply" parameterType="org.tjetc.backend.entity.citizen.OrderEvaluate">
+        UPDATE order_evaluate
+        SET is_reopen_applied = #{isReopenApplied}, reopen_reason = #{reopenReason},
+            reopen_status = #{reopenStatus}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateReopenApprove" parameterType="org.tjetc.backend.entity.citizen.OrderEvaluate">
+        UPDATE order_evaluate
+        SET reopen_status = #{reopenStatus}, reopen_approve_time = #{reopenApproveTime},
+            reopen_approve_remark = #{reopenApproveRemark}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

@@ -1,0 +1,27 @@
+# 所有文本文件自动处理换行符（检出时转CRLF，提交时转LF）
+* text=auto
+
+# 强制指定某些文件类型始终用 LF（推荐用于代码/配置文件）
+*.js text eol=lf
+*.vue text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.ts text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+
+# 二进制文件不做任何转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.zip binary
+*.gz binary

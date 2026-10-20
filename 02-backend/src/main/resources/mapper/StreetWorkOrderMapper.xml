@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 街道办端工单副本表（street_work_order）：副本由 OrderCopySyncService 事务内「先删后拷」自管理端权威表刷新 -->
+<mapper namespace="org.tjetc.backend.mapper.street.StreetWorkOrderMapper">
+
+    <sql id="baseColumns">
+        id, order_no, source_appeal_id, title, content, category, sub_category, level,
+        attention_count, confidence, hit_keywords, need_review, region, county_code, county_name, department,
+        street_office, dept_receive_time, street_receive_time, street_code, street_name, address_detail, is_broad, status, same_source_order_id, event_type, dispose_plan, dispose_result,
+        dispose_tag, dispose_time, dispose_user_id, dispose_user_name, deadline,
+        is_overdue, delay_count, street_return_count, dept_return_count,
+        dept_audit_status, dept_audit_time, dept_audit_user_id, dept_audit_user_name,
+        dept_audit_remark, dept_score, dept_score_time, final_audit_status,
+        final_audit_time, final_audit_user_id, final_audit_user_name, final_audit_remark,
+        final_reject_target, archive_time, archive_type, is_archived, reopen_count,
+        close_time, is_completed, is_deleted, create_time, update_time
+    </sql>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM street_work_order
+        WHERE id = #{id} AND is_deleted = 0
+    </select>
+
+    <!-- 整行拷贝（SQL 级镜像：含实体未映射的全部列），幂等：调用方先物理删除同 id 旧副本 -->
+    <insert id="copyFromAdmin">
+        INSERT INTO street_work_order
+        SELECT * FROM admin_work_order WHERE id = #{id}
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM street_work_order WHERE id = #{id}
+    </delete>
+
+    <!-- 街道办端权限内工单查询（API 9.5）：仅本辖区工单（street_office 前缀匹配，兼容带「街道办」后缀数据）；
+         显示规则：只显示待街道办处理(PENDING_STREET_PROCESS)的在办工单；
+         已处理（PENDING_EVALUATE/EVALUATED/STREET_DONE）、已驳回（STREET_REJECTED）、
+         已审核/已办结（DEPT_AUDITED/DEPT_REJECTED/CLOSED/ARCHIVED）及管理端/部门端池子状态一律不显示 -->
+    <select id="selectPageStreet" resultType="map">
+        SELECT id, order_no, title, content, category, sub_category, level, region, department,
+               street_office, status, is_overdue, deadline, create_time, update_time,
+               dispose_tag, dept_audit_status, final_audit_status, hit_keywords, confidence,
+               dept_receive_time, street_receive_time
+        FROM street_work_order
+        WHERE is_deleted = 0
+          AND street_office LIKE CONCAT(#{streetOffice}, '%')
+          AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN', 'PENDING_DEPT_PROCESS', 'PENDING_DEPT_ASSIGN',
+                             'PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE', 'STREET_REJECTED',
+                             'DEPT_AUDITED', 'DEPT_REJECTED', 'CLOSED', 'ARCHIVED', 'RETURNED')
+        <if test="orderNo != null and orderNo != ''">AND order_no = #{orderNo}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPageStreet" resultType="long">
+        SELECT COUNT(1)
+        FROM street_work_order
+        WHERE is_deleted = 0
+          AND street_office LIKE CONCAT(#{streetOffice}, '%')
+          AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN', 'PENDING_DEPT_PROCESS', 'PENDING_DEPT_ASSIGN',
+                             'PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE', 'STREET_REJECTED',
+                             'DEPT_AUDITED', 'DEPT_REJECTED', 'CLOSED', 'ARCHIVED', 'RETURNED')
+        <if test="orderNo != null and orderNo != ''">AND order_no = #{orderNo}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+    </select>
+
+    <!-- 街道办工作台统计（本辖区工单概况）：在办待处理 = PENDING_STREET_PROCESS（街道办=待处理） -->
+    <select id="workbenchSummaryStreet" resultType="map">
+        SELECT
+            COUNT(*)                 AS order_total,
+            SUM(CASE WHEN status = 'PENDING_STREET_PROCESS' THEN 1 ELSE 0 END) AS pending_handle,
+            SUM(CASE WHEN status = 'PENDING_DEPT_PROCESS' THEN 1 ELSE 0 END) AS pending_verify,
+            SUM(CASE WHEN status = 'PENDING_DEPT_ASSIGN' THEN 1 ELSE 0 END) AS pending_assign,
+            SUM(CASE WHEN status IN ('PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE') THEN 1 ELSE 0 END) AS pending_audit,
+            SUM(CASE WHEN year(dispose_time) = #{year} AND month(dispose_time) = #{month} THEN 1 ELSE 0 END) AS month_done,
+            COALESCE(AVG(CASE WHEN dept_score IS NOT NULL THEN dept_score END), 0) AS avg_score
+        FROM street_work_order
+        WHERE is_deleted = 0
+          AND street_office = #{region}
+    </select>
+
+</mapper>

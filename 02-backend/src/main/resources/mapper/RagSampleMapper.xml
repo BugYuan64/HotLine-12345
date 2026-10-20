@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.RagSampleMapper">
+
+    <sql id="baseColumns">
+        id, category_id, content, vector_id, source, quality_level,
+        original_error_category, status, create_time
+    </sql>
+
+    <!-- 分页查询：联表带出分类名称（一级分类/二级标签），前端列表展示 -->
+    <select id="selectPage" resultType="map">
+        SELECT s.id, s.category_id, s.content, s.vector_id, s.source, s.quality_level,
+               s.original_error_category, s.status, s.create_time,
+               c.primary_category, c.sub_label
+        FROM rag_sample s
+        JOIN classify_category c ON c.id = s.category_id
+        <where>
+            <if test="categoryId != null">AND s.category_id = #{categoryId}</if>
+            <if test="source != null and source != ''">AND s.source = #{source}</if>
+            <if test="qualityLevel != null and qualityLevel != ''">AND s.quality_level = #{qualityLevel}</if>
+            <if test="status != null and status != ''">AND s.status = #{status}</if>
+        </where>
+        ORDER BY s.id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM rag_sample s
+        <where>
+            <if test="categoryId != null">AND s.category_id = #{categoryId}</if>
+            <if test="source != null and source != ''">AND s.source = #{source}</if>
+            <if test="qualityLevel != null and qualityLevel != ''">AND s.quality_level = #{qualityLevel}</if>
+            <if test="status != null and status != ''">AND s.status = #{status}</if>
+        </where>
+    </select>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.admin.RagSample">
+        SELECT <include refid="baseColumns"/>
+        FROM rag_sample
+        WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.RagSample" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO rag_sample (category_id, content, vector_id, source, quality_level,
+                                original_error_category, status)
+        VALUES (#{categoryId}, #{content}, #{vectorId}, #{source}, #{qualityLevel},
+                #{originalErrorCategory}, #{status})
+    </insert>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.admin.RagSample">
+        UPDATE rag_sample
+        SET category_id = #{categoryId}, content = #{content}, vector_id = #{vectorId},
+            source = #{source}, quality_level = #{qualityLevel},
+            original_error_category = #{originalErrorCategory}, status = #{status}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM rag_sample WHERE id = #{id}
+    </delete>
+
+    <select id="selectAll" resultType="org.tjetc.backend.entity.admin.RagSample">
+        SELECT <include refid="baseColumns"/>
+        FROM rag_sample
+        ORDER BY id DESC
+    </select>
+
+</mapper>

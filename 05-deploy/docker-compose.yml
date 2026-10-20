@@ -1,0 +1,150 @@
+name: hotline12345
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: hotline-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: hotline_12345
+      TZ: Asia/Shanghai
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-123456}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: hotline-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: hotline-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # 一次性任务：自动创建业务桶（media-bucket），完成即退出
+  minio-init:
+    image: minio/mc:latest
+    container_name: hotline-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-media-bucket}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 \$\$MINIO_ACCESS_KEY \$\$MINIO_SECRET_KEY &&
+      mc mb --ignore-existing local/\$\$MINIO_BUCKET &&
+      mc anonymous set download local/\$\$MINIO_BUCKET &&
+      echo 'bucket ready: '\$\$MINIO_BUCKET"
+
+  backend:
+    build: ./backend
+    container_name: hotline-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      # 数据源：compose 网络内用服务名 mysql
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/hotline_12345?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      # Redis（Stack：向量+知识桥）
+      SPRING_DATA_REDIS_HOST: redis
+      # AI 服务（compose 内服务名）
+      APP_AI_BASE_URL: http://ai:8000
+      # MinIO（compose 内容器，minio-init 已自动建桶）
+      APP_MINIO_ENDPOINT: http://minio:9000
+      APP_MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      APP_MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      APP_MINIO_BUCKET: ${MINIO_BUCKET:-media-bucket}
+      # 短信：默认 log-sender=开发模式仅打印验证码到日志；改 aliyun 并在 .env 填 AK/SK/签名后真实发送
+      APP_SMS_SENDER: ${APP_SMS_SENDER:-log-sender}
+      ALIYUN_SMS_ACCESS_KEY: ${ALIYUN_SMS_ACCESS_KEY:-}
+      ALIYUN_SMS_SECRET_KEY: ${ALIYUN_SMS_SECRET_KEY:-}
+      ALIYUN_SMS_SIGN_NAME: ${ALIYUN_SMS_SIGN_NAME:-}
+      ALIYUN_SMS_TEMPLATE_CODE: ${ALIYUN_SMS_TEMPLATE_CODE:-SMS_337985013}
+      TZ: Asia/Shanghai
+    ports:
+      - "8080:8080"
+    volumes:
+      # 本地导出 Excel / 上传文件持久化（WebMvcConfig 映射 file:./exports 与 file:./uploads）
+      - backend_exports:/app/exports
+      - backend_uploads:/app/uploads
+
+  ai:
+    build: ./ai
+    container_name: hotline-ai
+    restart: unless-stopped
+    env_file:
+      - ./ai/.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      # AI 助手工具回调查询业务数据：compose 内用服务名 backend（禁止用 localhost——容器内是 AI 自身）
+      JAVA_BASE_URL: http://backend:8080
+      # DashScope 密钥与内网签名（与 backend 的 AI_SIGN_SECRET 一致）
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      INTERNAL_SIGN_SECRET: ${AI_SIGN_SECRET:-hotline-ai-internal-sign-secret}
+      TZ: Asia/Shanghai
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    container_name: hotline-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  mysql_data:
+  redis_data:
+  minio_data:
+  backend_exports:
+  backend_uploads:

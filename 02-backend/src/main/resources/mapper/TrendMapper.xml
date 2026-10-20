@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.TrendMapper">
+
+    <!-- 诉求趋势对比：按一级/二级分类统计每日诉求量（只统计分类已确定的工单，历史脏数据 category 为空的不计入）
+     【数据口径】管理端折线图读 admin_work_order 主表全部工单（含已归档行——归档仅翻 is_archived 标记，行不删；
+         归档表为主表全行镜像，仅终审归档页读，此处不 UNION，避免双计）
+         region 过滤：工单 region 为「区县+街道/点位」拼接（如"海港区新城区"），按前缀匹配只筛到区级、不下钻街道 -->
+    <select id="selectDailyCounts" resultType="map">
+        SELECT DATE_FORMAT(create_time, '%Y-%m-%d') AS stat_date, COUNT(*) AS stat_count
+        FROM admin_work_order
+        <where>
+            is_deleted = 0
+            AND category IS NOT NULL
+            <if test="category != null and category != ''">
+                AND category = #{category}
+            </if>
+            <if test="subCategory != null and subCategory != ''">
+                AND sub_category = #{subCategory}
+            </if>
+            <if test="region != null and region != ''">
+                AND region LIKE CONCAT(#{region}, '%')
+            </if>
+            AND create_time &gt;= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        </where>
+        GROUP BY DATE_FORMAT(create_time, '%Y-%m-%d')
+        ORDER BY stat_date
+    </select>
+</mapper>

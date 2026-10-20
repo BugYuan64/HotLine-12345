@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.common.WorkOrderAppealMapper">
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.WorkOrderAppeal"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO work_order_appeal (order_id, appeal_id, is_primary)
+        VALUES (#{orderId}, #{appealId}, #{isPrimary})
+    </insert>
+
+    <select id="countByAppealId" resultType="int">
+        SELECT COUNT(1)
+        FROM work_order_appeal
+        WHERE appeal_id = #{appealId}
+    </select>
+
+    <select id="selectOrderIdByAppealId" resultType="long">
+        SELECT order_id
+        FROM work_order_appeal
+        WHERE appeal_id = #{appealId}
+        ORDER BY id ASC
+        LIMIT 1
+    </select>
+
+    <delete id="deleteByAppealId">
+        DELETE FROM work_order_appeal
+        WHERE appeal_id = #{appealId}
+    </delete>
+
+    <select id="selectAnotherAppealId" resultType="long">
+        SELECT appeal_id
+        FROM work_order_appeal
+        WHERE order_id = #{orderId}
+          AND appeal_id != #{excludeAppealId}
+        ORDER BY is_primary DESC, id ASC
+        LIMIT 1
+    </select>
+
+    <select id="selectAppealIdsByOrderId" resultType="long">
+        SELECT appeal_id
+        FROM work_order_appeal
+        WHERE order_id = #{orderId}
+        ORDER BY is_primary DESC, id ASC
+    </select>
+
+</mapper>

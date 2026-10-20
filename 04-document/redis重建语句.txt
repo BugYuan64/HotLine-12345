@@ -1,0 +1,11 @@
+# 进入 redis 容器终端
+docker exec -it crm-redis sh
+
+# 容器内执行批量删除
+redis-cli --scan --pattern 'stats:daily:*' | xargs redis-cli DEL
+
+# 容器内执行单key删除
+redis-cli DEL predict:texts
+
+# 操作完成后退出容器
+exit

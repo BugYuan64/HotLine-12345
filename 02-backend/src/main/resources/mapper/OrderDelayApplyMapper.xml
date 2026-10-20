@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.staff.OrderDelayApplyMapper">
+
+    <sql id="baseColumns">
+        id, order_id, apply_user_id, apply_user_name, delay_reason, expected_time,
+        status, approve_user_id, approve_time, approve_remark, create_time
+    </sql>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.staff.OrderDelayApply" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO order_delay_apply (order_id, apply_user_id, apply_user_name, delay_reason, expected_time, status)
+        VALUES (#{orderId}, #{applyUserId}, #{applyUserName}, #{delayReason}, #{expectedTime}, #{status})
+    </insert>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.staff.OrderDelayApply">
+        SELECT <include refid="baseColumns"/>
+        FROM order_delay_apply
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectByOrderId" resultType="org.tjetc.backend.entity.staff.OrderDelayApply">
+        SELECT <include refid="baseColumns"/>
+        FROM order_delay_apply
+        WHERE order_id = #{orderId}
+        ORDER BY id DESC
+    </select>
+
+    <!-- 待审批延期申请（部门维度，API 11.2.6）：工单信息取部门端副本表（三端数据解耦） -->
+    <select id="selectPendingByDept" resultType="map">
+        SELECT a.id, a.order_id, w.order_no, w.title AS summary, w.street_office,
+               a.apply_user_name, a.delay_reason, a.expected_time, a.create_time, w.delay_count, w.deadline
+        FROM order_delay_apply a
+        JOIN dept_work_order w ON w.id = a.order_id
+        WHERE a.status = 'PENDING' AND w.is_deleted = 0
+        <if test="department != null and department != ''">AND w.category = #{department}</if>
+        <if test="countyCode != null and countyCode != ''">AND w.county_code = #{countyCode}</if>
+        ORDER BY a.create_time DESC
+    </select>
+
+    <!-- 待审批延期数（工作台待办卡，口径与 selectPendingByDept 一致） -->
+    <select id="countPendingByDept" resultType="long">
+        SELECT COUNT(1)
+        FROM order_delay_apply a
+        JOIN dept_work_order w ON w.id = a.order_id
+        WHERE a.status = 'PENDING' AND w.is_deleted = 0
+        <if test="department != null and department != ''">AND w.category = #{department}</if>
+        <if test="countyCode != null and countyCode != ''">AND w.county_code = #{countyCode}</if>
+    </select>
+
+    <update id="updateApprove" parameterType="org.tjetc.backend.entity.staff.OrderDelayApply">
+        UPDATE order_delay_apply
+        SET status = #{status}, approve_user_id = #{approveUserId}, approve_time = #{approveTime},
+            approve_remark = #{approveRemark}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

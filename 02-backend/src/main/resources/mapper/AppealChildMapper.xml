@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.citizen.AppealChildMapper">
+
+    <sql id="baseColumns">
+        id, appeal_no, parent_id, title, content, category, sub_category, confidence, need_review, clean_log_id,
+        citizen_name, citizen_phone, province, city, district, district_code, street, street_code, community,
+        address_detail, region, broad_flag, status, is_deleted,
+        create_time, update_time
+    </sql>
+
+    <!-- 子诉求无单值 region 列，按 regionOf 逻辑派生：优先区县，其次街道 -->
+    <sql id="childRegionExpr">
+        CASE WHEN district IS NOT NULL AND district != '' THEN district ELSE street END
+    </sql>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE id = #{id} AND is_deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="selectByNo" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE appeal_no = #{appealNo} AND is_deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="selectByIds" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+          AND is_deleted = 0
+        ORDER BY id ASC
+    </select>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_child
+        WHERE create_time >= #{start}
+    </select>
+
+    <select id="countByPrefix" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_child
+        WHERE appeal_no LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+    <select id="selectPage" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        <where>
+            <!-- 编号查询同时匹配子诉求编号（AS...）与所属父诉求编号（AP...，市民提交后仅知父编号） -->
+            <if test="appealNo != null and appealNo != ''">
+                AND (appeal_no LIKE CONCAT('%', #{appealNo}, '%')
+                     OR parent_id IN (SELECT id FROM appeal_parent WHERE appeal_no LIKE CONCAT('%', #{appealNo}, '%')))
+            </if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+            AND is_deleted = 0
+        </where>
+        ORDER BY create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_child
+        <where>
+            <if test="appealNo != null and appealNo != ''">
+                AND (appeal_no LIKE CONCAT('%', #{appealNo}, '%')
+                     OR parent_id IN (SELECT id FROM appeal_parent WHERE appeal_no LIKE CONCAT('%', #{appealNo}, '%')))
+            </if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+            AND is_deleted = 0
+        </where>
+    </select>
+
+    <select id="selectUnorderedChildren" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE status = 'READY' AND is_deleted = 0
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectChildrenByParentId" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE parent_id = #{parentId} AND is_deleted = 0
+        ORDER BY id ASC
+    </select>
+
+    <select id="countChildrenByParentId" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_child
+        WHERE parent_id = #{parentId} AND is_deleted = 0
+    </select>
+
+    <!-- 市民端列表聚合：按父诉求ID批量查子诉求及其工单当前状态（LEFT JOIN，未建单子诉求工单字段为 NULL）；
+         附带处置/办结时间与是否已评价（order_evaluate.order_id 唯一，JOIN 不会翻倍），供市民端删除条件判断 -->
+    <select id="selectChildrenWithOrderByParentIds" resultType="map">
+        SELECT c.parent_id  AS parentId,
+               c.id         AS childId,
+               c.appeal_no  AS appealNo,
+               c.title      AS title,
+               c.content    AS content,
+               o.id         AS orderId,
+               o.status     AS orderStatus,
+               o.department AS department,
+               o.street_office AS streetOffice,
+               o.is_archived AS isArchived,
+               o.dispose_time AS disposeTime,
+               o.close_time AS closeTime,
+               (ev.id IS NOT NULL) AS evaluated
+        FROM appeal_child c
+        LEFT JOIN work_order_appeal woa ON woa.appeal_id = c.id
+        LEFT JOIN admin_work_order o ON o.id = woa.order_id AND o.is_deleted = 0
+        LEFT JOIN order_evaluate ev ON ev.order_id = o.id
+        WHERE c.is_deleted = 0
+          AND c.parent_id IN
+        <foreach collection="parentIds" item="pid" open="(" separator="," close=")">#{pid}</foreach>
+        ORDER BY c.parent_id ASC, c.id ASC
+    </select>
+
+    <select id="aggregateChildrenDailyByCategoryRegion" resultType="map">
+        SELECT DATE_FORMAT(ac.create_time, '%Y%m%d') AS d,
+               wo.category,
+               <include refid="childRegionExpr"/> AS region,
+               COUNT(1) AS cnt
+        FROM appeal_child ac
+        LEFT JOIN work_order_appeal woa ON woa.appeal_id = ac.id
+        LEFT JOIN admin_work_order wo ON wo.id = woa.order_id
+        WHERE ac.status = 'ORDERED' AND ac.is_deleted = 0
+          AND wo.category IS NOT NULL
+          AND ac.create_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        GROUP BY DATE_FORMAT(ac.create_time, '%Y%m%d'), wo.category, <include refid="childRegionExpr"/>
+    </select>
+
+    <select id="selectRecentChildrenTexts" resultType="map">
+        SELECT wo.category,
+               <include refid="childRegionExpr"/> AS region,
+               ac.title, ac.content
+        FROM appeal_child ac
+        LEFT JOIN work_order_appeal woa ON woa.appeal_id = ac.id
+        LEFT JOIN admin_work_order wo ON wo.id = woa.order_id
+        WHERE ac.status = 'ORDERED' AND ac.is_deleted = 0
+          AND wo.category IS NOT NULL
+          AND ac.create_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        ORDER BY ac.create_time DESC
+        LIMIT 5000
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.citizen.AppealChild" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO appeal_child (appeal_no, parent_id, title, content, category, clean_log_id,
+                                  citizen_name, citizen_phone, province, city, district, district_code, street, street_code, community,
+                                  address_detail, region, broad_flag, status)
+        VALUES (#{appealNo}, #{parentId}, #{title}, #{content}, #{category}, #{cleanLogId},
+                #{citizenName}, #{citizenPhone}, #{province}, #{city}, #{district}, #{districtCode}, #{street}, #{streetCode}, #{community},
+                #{addressDetail}, #{region}, #{broadFlag}, #{status})
+    </insert>
+
+    <!-- AI 流水线扫描：待AI审核（AUDIT_PENDING）的子诉求 -->
+    <select id="selectAuditPending" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE status = 'AUDIT_PENDING' AND is_deleted = 0
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 标题阶段扫描：待AI生成标题（TITLE_PENDING）的子诉求 -->
+    <select id="selectTitlePendingChildren" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE status = 'TITLE_PENDING' AND is_deleted = 0
+          AND update_time &lt; DATE_SUB(NOW(), INTERVAL 30 SECOND)  <!-- 停留30s未处理才兜底（实时调度优先） -->
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- OTHER 一级分类队列：AI一级分类中（CLASSIFYING）的子诉求 -->
+    <select id="selectClassifyingChildren" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE status = 'CLASSIFYING' AND is_deleted = 0
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- AI二级分类队列：AI二级分类中（CLASSIFYING_SUB，进程中断孤儿恢复）的子诉求 -->
+    <select id="selectClassifyingSubChildren" resultType="org.tjetc.backend.entity.citizen.AppealChild">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_child
+        WHERE status = 'CLASSIFYING_SUB' AND is_deleted = 0
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 原子领取：AUDIT_PENDING → AUDITING（AI审核中），防并发重复处理 -->
+    <update id="claimForAudit">
+        UPDATE appeal_child
+        SET status = 'AUDITING'
+        WHERE id = #{id} AND status = 'AUDIT_PENDING' AND is_deleted = 0
+    </update>
+
+    <!-- 原子认领：仅 READY 可置为 ORDERING（生成中），返回受影响行数，防止并发/重复生成工单；
+         is_deleted=0：防止"扫描后-认领前"被软删的子诉求仍生成工单 -->
+    <update id="claimForOrder">
+        UPDATE appeal_child
+        SET status = 'ORDERING'
+        WHERE id = #{id} AND status = 'READY' AND is_deleted = 0
+    </update>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.citizen.AppealChild">
+        UPDATE appeal_child
+        <set>
+            <if test="title != null">title = #{title},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="category != null">category = #{category},</if>
+            <if test="subCategory != null">sub_category = #{subCategory},</if>
+            <if test="confidence != null">confidence = #{confidence},</if>
+            <if test="needReview != null">need_review = #{needReview},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="citizenName != null">citizen_name = #{citizenName},</if>
+            <if test="citizenPhone != null">citizen_phone = #{citizenPhone},</if>
+            <if test="district != null">district = #{district},</if>
+            <if test="districtCode != null">district_code = #{districtCode},</if>
+            <if test="street != null">street = #{street},</if>
+            <if test="streetCode != null">street_code = #{streetCode},</if>
+            <if test="community != null">community = #{community},</if>
+            <if test="addressDetail != null">address_detail = #{addressDetail},</if>
+            <if test="region != null">region = #{region},</if>
+            <if test="broadFlag != null">broad_flag = #{broadFlag},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <!-- 软删除：保留历史数据，置 is_deleted=1；列表/查询统一过滤 is_deleted=0 -->
+    <update id="deleteById">
+        UPDATE appeal_child
+        SET is_deleted = 1
+        WHERE id = #{id}
+    </update>
+
+    <!-- 按父诉求软删除其全部子诉求（市民端删除诉求：父+子一并标记，保留历史，列表过滤不展示） -->
+    <update id="deleteByParentId">
+        UPDATE appeal_child
+        SET is_deleted = 1
+        WHERE parent_id = #{parentId} AND is_deleted = 0
+    </update>
+
+</mapper>

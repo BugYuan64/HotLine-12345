@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.PredictionConfigMapper">
+
+    <select id="selectFirst" resultType="org.tjetc.backend.entity.admin.PredictionConfig">
+        SELECT id, predict_period, confidence_threshold, cluster_count, history_range, update_time
+        FROM prediction_config
+        ORDER BY id
+        LIMIT 1
+    </select>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.admin.PredictionConfig">
+        UPDATE prediction_config
+        SET predict_period = #{predictPeriod},
+            confidence_threshold = #{confidenceThreshold},
+            cluster_count = #{clusterCount},
+            history_range = #{historyRange}
+        WHERE id = #{id}
+    </update>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.PredictionConfig" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO prediction_config (predict_period, confidence_threshold, cluster_count, history_range)
+        VALUES (#{predictPeriod}, #{confidenceThreshold}, #{clusterCount}, #{historyRange})
+    </insert>
+
+</mapper>

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.SensitiveEventMapper">
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.SensitiveEvent" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sensitive_event (appeal_id, appeal_no, risk_type, risk_level, handle_status, push_targets,
+                                     advice, title, content, category, citizen_name, citizen_phone,
+                                     province, city, district, street, community, address_detail, region, broad_flag,
+                                     attachment_ids)
+        VALUES (#{appealId}, #{appealNo}, #{riskType}, #{riskLevel}, #{handleStatus}, #{pushTargets},
+                #{advice}, #{title}, #{content}, #{category}, #{citizenName}, #{citizenPhone},
+                #{province}, #{city}, #{district}, #{street}, #{community}, #{addressDetail}, #{region}, #{broadFlag},
+                #{attachmentIds})
+    </insert>
+
+    <sql id="baseColumns">
+        id, appeal_id, appeal_no, risk_type, risk_level, trigger_time, handle_status, push_targets,
+        advice, title, content, category, citizen_name, citizen_phone,
+        province, city, district, street, community, address_detail, region, broad_flag, attachment_ids
+    </sql>
+
+    <select id="selectPage" resultType="org.tjetc.backend.entity.admin.SensitiveEvent">
+        SELECT <include refid="baseColumns"/>
+        FROM sensitive_event
+        <where>
+            <if test="riskLevel != null and riskLevel != ''">AND risk_level = #{riskLevel}</if>
+            <if test="handleStatus != null and handleStatus != ''">AND handle_status = #{handleStatus}</if>
+        </where>
+        ORDER BY trigger_time DESC, id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1) FROM sensitive_event
+        <where>
+            <if test="riskLevel != null and riskLevel != ''">AND risk_level = #{riskLevel}</if>
+            <if test="handleStatus != null and handleStatus != ''">AND handle_status = #{handleStatus}</if>
+        </where>
+    </select>
+
+    <!-- 编号生成：按前缀统计当日敏感事件数（与 appeal_parent 编号生成同风格） -->
+    <select id="countByPrefix" resultType="long">
+        SELECT COUNT(1) FROM sensitive_event WHERE appeal_no LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+    <update id="updateHandleStatus">
+        UPDATE sensitive_event SET handle_status = #{handleStatus} WHERE id = #{id}
+    </update>
+
+    <!-- 市民端"办理进度"：按提诉人手机号查询本人敏感事件（编号可精确过滤） -->
+    <select id="selectPageByPhone" resultType="org.tjetc.backend.entity.admin.SensitiveEvent">
+        SELECT <include refid="baseColumns"/>
+        FROM sensitive_event
+        WHERE citizen_phone = #{citizenPhone}
+        <if test="appealNo != null and appealNo != ''">AND appeal_no = #{appealNo}</if>
+        ORDER BY trigger_time DESC, id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countPageByPhone" resultType="long">
+        SELECT COUNT(1) FROM sensitive_event
+        WHERE citizen_phone = #{citizenPhone}
+        <if test="appealNo != null and appealNo != ''">AND appeal_no = #{appealNo}</if>
+    </select>
+
+</mapper>

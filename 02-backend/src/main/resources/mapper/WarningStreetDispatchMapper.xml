@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.WarningStreetDispatchMapper">
+
+    <sql id="baseColumns">
+        id, warning_id, street_code, street_office, county_name, respond_status,
+        dispatch_time, respond_time, respond_user_id, respond_user_name
+    </sql>
+
+    <insert id="insertBatch">
+        INSERT INTO warning_street_dispatch (warning_id, street_code, street_office, county_name,
+                                             respond_status, dispatch_time)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.warningId}, #{item.streetCode}, #{item.streetOffice}, #{item.countyName},
+             #{item.respondStatus}, #{item.dispatchTime})
+        </foreach>
+    </insert>
+
+    <select id="selectByWarningId" resultType="org.tjetc.backend.entity.admin.WarningStreetDispatch">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_street_dispatch
+        WHERE warning_id = #{warningId}
+        ORDER BY id ASC
+    </select>
+
+    <select id="selectByWarningAndStreet" resultType="org.tjetc.backend.entity.admin.WarningStreetDispatch">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_street_dispatch
+        WHERE warning_id = #{warningId}
+          AND street_office = #{streetOffice}
+        LIMIT 1
+    </select>
+
+    <update id="updateRespond">
+        UPDATE warning_street_dispatch
+        SET respond_status = 'RESPONDED',
+            respond_time = #{respondTime},
+            respond_user_id = #{respondUserId},
+            respond_user_name = #{respondUserName}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 部门/管理端标记响应后同步分发表：未响应分发记录全部置为已响应（保留街道办已响应者的响应人/时间） -->
+    <update id="updateAllRespond">
+        UPDATE warning_street_dispatch
+        SET respond_status = 'RESPONDED',
+            respond_time = #{respondTime}
+        WHERE warning_id = #{warningId}
+          AND respond_status != 'RESPONDED'
+    </update>
+
+    <!-- 街道办工作台待响应预警数：口径与 selectStreetPage 一致（已发送 + 本街道 + 未响应） -->
+    <select id="countUnrespondedByStreet" resultType="int">
+        SELECT COUNT(1)
+        FROM warning_street_dispatch d
+        JOIN warning_record w ON w.id = d.warning_id
+        WHERE w.status = 'SENT'
+          AND d.street_office = #{streetOffice}
+          AND d.respond_status = 'UNRESPONDED'
+    </select>
+
+</mapper>

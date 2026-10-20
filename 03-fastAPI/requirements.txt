@@ -1,0 +1,28 @@
+# Core framework
+fastapi==0.141.1        # starlette 1.x compatible (pydantic-ai dep)
+uvicorn[standard]==0.52.4
+pydantic==2.13.5        # pydantic-ai 2.38 requires >=2.12
+pydantic-settings==2.7.1
+pydantic-ai==2.38.0     # Agent orchestration (title/audit/classify)
+openai==3.7.0           # pydantic-ai 2.38 requires >=3.0
+httpx==0.28.1
+
+# Chinese text
+jieba==0.42.1
+zhconv==1.4.3
+
+# Redis Stack (HNSW vector)
+redis[hiredis]==5.2.1
+
+# Data
+numpy==1.26.4
+
+# Logging
+loguru==0.7.3
+
+# Env
+python-dotenv==1.2.3
+
+# Production helpers
+tenacity==9.0.0
+slowapi==0.1.9

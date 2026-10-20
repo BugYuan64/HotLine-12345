@@ -1,0 +1,122 @@
+spring:
+  application:
+    name: 02-backend
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 【环境二选一】远端网络机：jdbc:mysql://192.168.159.100:3306/...（远端同学真实环境）
+    # 本机开发：localhost（当前生效；hotline_12345 库在本机）
+    url: jdbc:mysql://localhost:3306/hotline_12345?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456
+    hikari:
+      # 后台 AI 流水线/拆分/建单 worker 高频并发 DB 操作，扩容连接池
+      maximum-pool-size: 20
+  servlet:
+    multipart:
+      # 附件上传上限（业务层校验 10MB，传输层留余量）
+      max-file-size: 20MB
+      max-request-size: 25MB
+  data:
+    redis:
+      # Redis Stack：同时承载 验证码/登录锁/Token黑名单（Java） 与 RAG向量检索（Python AI 服务）
+      # 【环境二选一】远端网络机 192.168.159.100（远端同学真实环境）；本机实测可达 192.168.114.100（当前生效）
+      host: 192.168.114.100
+      port: 6379
+      password: "" # TODO 无密码留空
+
+server:
+  port: 8080
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+app:
+  jwt:
+    # JWT 签名密钥：默认为固定测试密钥（方便本地联调，勿用于生产）；
+    # 生产环境务必通过环境变量 JWT_SECRET 覆盖为随机值至少32个字符，
+    # 生成方式：openssl rand -base64 48），避免密钥泄露后被伪造任意管理员 Token
+    secret: ${JWT_SECRET:hotline-12345-local-fixed-test-jwt-secret-2026}
+    # Token 有效期（秒），文档默认 2 小时
+    expire-seconds: 7200
+  ai:
+    # Python AI 服务内网地址（/ai/v1/，HMAC-SHA256 签名）
+    base-url: http://localhost:8000
+    # 内网签名密钥：环境变量注入（需与 03-fastAPI 的 AI_SIGN_SECRET 保持一致；
+    # 出于演示便利保留默认值，生产环境务必覆盖）
+    sign-secret: ${AI_SIGN_SECRET:hotline-ai-internal-sign-secret}
+    connect-timeout-ms: 3000
+    # 读取超时：AI 慢时快速失败降级（返回空由调用方降级），避免长事务持锁与前端 30s 超时；15s 未响应即降级
+    read-timeout-ms: 15000
+  auto:
+    # 自动处理检测周期（毫秒）：到周期才检测待拆分/待建单诉求；开启自动模式后需等满一个周期才第一次检测
+    process-interval-ms: 15000
+  minio:
+    # MinIO 对象存储（API 12.1 文件存储）：文件本体存 MinIO，元数据存 sys_file 表
+    # 【留白】请填写实际 MinIO 地址与凭据后生效；bucket 不存在时启动后首次上传自动创建
+    endpoint: ${MINIO_ENDPOINT:http://192.168.114.100:9000}
+    access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${MINIO_BUCKET:media-bucket}
+    # 预签名 URL 有效期（秒），默认 2 小时
+    presign-expire-seconds: 7200
+  sms:
+    # 短信验证码：6位数字，有效期5分钟，同手机号60秒内禁止重发（API 3.2）
+    code-expire-seconds: 300
+    retry-seconds: 60
+    # 同 IP 限频（次/分钟），防恶意刷取（API 3.2 技术说明）
+    ip-limit-per-minute: 10
+    # 短信发送器：aliyun=阿里云短信（真实发送）；log-sender=开发模式仅打印验证码日志
+    sender: log-sender
+    # 阿里云短信配置（需要真实发送时改 sender 为 aliyun 并取消以下注释）
+    # aliyun:
+    #   # 【留白】阿里云短信配置：AccessKey、已申请的签名与模板 code（验证码模板含 code 变量）
+    #   access-key: ${ALIYUN_SMS_ACCESS_KEY:}
+    #   secret-key: ${ALIYUN_SMS_SECRET_KEY:}
+    #   sign-name: ${ALIYUN_SMS_SIGN_NAME:}
+    #   template-code: ${ALIYUN_SMS_TEMPLATE_CODE:}
+  mail:
+    # QQ邮箱验证码发信配置（注册邮箱验证码功能）
+    # 【留白】请填写你的QQ邮箱地址与SMTP授权码后生效；授权码获取：QQ邮箱 → 设置 → 账号 → 开启SMTP服务 → 生成授权码
+    host: smtp.qq.com
+    port: 465
+    ssl-enabled: true
+    from: "3056380589@qq.com"        # TODO 【留白】发件邮箱地址（一般与 username 相同，如 xxxxxx@qq.com）
+    username: "3056380589@qq.com"    # TODO 【留白】你的QQ邮箱地址（如 xxxxxx@qq.com）
+    password: "nxxzzwpdezeoddec"    # TODO 【留白】QQ邮箱SMTP授权码（不是QQ登录密码）
+    # 邮箱验证码：6位数字，有效期5分钟，同邮箱60秒内禁止重发
+    code-expire-seconds: 300
+    retry-seconds: 60
+    # 同 IP 限频（次/分钟），防恶意刷取
+    ip-limit-per-minute: 10
+    # 未填写发信账号时仅打印验证码日志（开发模式），填写后自动切换为真实发信
+    connect-timeout-ms: 10000
+    read-timeout-ms: 10000
+  captcha:
+    # 图形验证码：4位字母数字，有效期2分钟，一次性校验（防人机，登录/发送验证码接口通用）
+    expire-seconds: 120
+  login:
+    # 连续5次密码错误锁定10分钟（API 2.2 账号锁定）
+    max-fail-count: 5
+    lock-seconds: 600
+  prediction:
+    # 预判每日执行时间（默认每天 01:17），cron 表达式
+    cron: "0 17 1 * * ?"
+    # 启动时立即执行一次预判（演示模式；生产可关闭）
+    run-on-startup: true
+  warning:
+    # 预警规则每日扫描时间（默认每天 01:30，预判之后执行），cron 表达式
+    cron: "0 30 1 * * ?"
+  order:
+    # 超期标记与接收超时提醒扫描（默认每小时整点），cron 表达式
+    timeout-cron: "0 0 * * * ?"
+    # 办结工单自动归档扫描（默认每天 02:10），cron 表达式
+    archive-cron: "0 10 2 * * ?"
+    dedup:
+      # 去重归并窗口（天），只查近 N 天内的候选工单
+      window-days: 7
+      # 语义相似度阈值（0.75：embedding 余弦 ≥ 0.75 即视为可归并，原默认 0.85 偏严）
+      similarity-threshold: 0.75
+      # 是否启用 AI 语义去重归并
+      enable-ai-dedup: true

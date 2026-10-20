@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.ClassifyKeywordMapper">
+
+    <sql id="baseColumns">
+        id, category_id, keyword, weight, status
+    </sql>
+
+    <!-- 分页查询：联表带出分类名称（一级分类/二级标签），前端列表展示 -->
+    <select id="selectPage" resultType="map">
+        SELECT k.id, k.category_id, k.keyword, k.weight, k.status,
+               c.primary_category, c.sub_label
+        FROM classify_keyword k
+        JOIN classify_category c ON c.id = k.category_id
+        <where>
+            <if test="categoryId != null">AND k.category_id = #{categoryId}</if>
+            <if test="keyword != null and keyword != ''">AND k.keyword LIKE CONCAT('%', #{keyword}, '%')</if>
+            <if test="status != null and status != ''">AND k.status = #{status}</if>
+        </where>
+        ORDER BY c.primary_category, k.weight DESC, k.id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM classify_keyword k
+        <where>
+            <if test="categoryId != null">AND k.category_id = #{categoryId}</if>
+            <if test="keyword != null and keyword != ''">AND k.keyword LIKE CONCAT('%', #{keyword}, '%')</if>
+            <if test="status != null and status != ''">AND k.status = #{status}</if>
+        </where>
+    </select>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.admin.ClassifyKeyword">
+        SELECT <include refid="baseColumns"/>
+        FROM classify_keyword
+        WHERE id = #{id}
+    </select>
+
+    <select id="countByCategoryAndKeyword" resultType="int">
+        SELECT COUNT(1) FROM classify_keyword
+        WHERE category_id = #{categoryId} AND keyword = #{keyword}
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.ClassifyKeyword" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO classify_keyword (category_id, keyword, weight, status)
+        VALUES (#{categoryId}, #{keyword}, #{weight}, #{status})
+    </insert>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.admin.ClassifyKeyword">
+        UPDATE classify_keyword
+        SET category_id = #{categoryId}, keyword = #{keyword}, weight = #{weight}, status = #{status}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM classify_keyword WHERE id = #{id}
+    </delete>
+
+    <!-- 知识桥同步（cls:keywords）/导出模板：全量关键词 + 分类名称 -->
+    <select id="selectAllWithCategory" resultType="map">
+        SELECT k.keyword, k.weight, k.status, c.primary_category, c.sub_label
+        FROM classify_keyword k
+        JOIN classify_category c ON c.id = k.category_id
+    </select>
+
+    <select id="selectWeightsByKeywords" resultType="org.tjetc.backend.entity.admin.ClassifyKeyword">
+        SELECT <include refid="baseColumns"/>
+        FROM classify_keyword
+        WHERE status = 'ENABLED'
+        AND keyword IN
+        <foreach collection="keywords" item="kw" open="(" separator="," close=")">
+            #{kw}
+        </foreach>
+    </select>
+
+</mapper>

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.street.StreetOrderLogMapper">
+
+    <sql id="baseColumns">
+        id, order_id, operate_type, operator_id, operator_role, operate_content,
+        before_data, after_data, create_time
+    </sql>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.OrderLog" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO street_order_log (order_id, operate_type, operator_id, operator_role, operate_content,
+                               before_data, after_data)
+        VALUES (#{orderId}, #{operateType}, #{operatorId}, #{operatorRole}, #{operateContent},
+                #{beforeData}, #{afterData})
+    </insert>
+
+    <select id="selectByOrderId" resultType="org.tjetc.backend.entity.common.OrderLog">
+        SELECT <include refid="baseColumns"/>
+        FROM street_order_log
+        WHERE order_id = #{orderId}
+        ORDER BY create_time ASC, id ASC
+    </select>
+
+</mapper>

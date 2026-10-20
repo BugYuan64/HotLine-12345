@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 部门端工单副本表（dept_work_order）：副本由 OrderCopySyncService 事务内「先删后拷」自管理端权威表刷新 -->
+<mapper namespace="org.tjetc.backend.mapper.dept.DeptWorkOrderMapper">
+
+    <sql id="baseColumns">
+        id, order_no, source_appeal_id, title, content, category, sub_category, level,
+        attention_count, confidence, hit_keywords, need_review, region, county_code, county_name, department,
+        street_office, dept_receive_time, street_receive_time, street_code, street_name, address_detail, is_broad, status, same_source_order_id, event_type, dispose_plan, dispose_result,
+        dispose_tag, dispose_time, dispose_user_id, dispose_user_name, deadline,
+        is_overdue, delay_count, street_return_count, dept_return_count,
+        dept_audit_status, dept_audit_time, dept_audit_user_id, dept_audit_user_name,
+        dept_audit_remark, dept_score, dept_score_time, final_audit_status,
+        final_audit_time, final_audit_user_id, final_audit_user_name, final_audit_remark,
+        final_reject_target, archive_time, archive_type, is_archived, reopen_count,
+        close_time, is_completed, is_deleted, create_time, update_time
+    </sql>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM dept_work_order
+        WHERE id = #{id} AND is_deleted = 0
+    </select>
+
+    <!-- 整行拷贝（SQL 级镜像：含实体未映射的全部列），幂等：调用方先物理删除同 id 旧副本 -->
+    <insert id="copyFromAdmin">
+        INSERT INTO dept_work_order
+        SELECT * FROM admin_work_order WHERE id = #{id}
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM dept_work_order WHERE id = #{id}
+    </delete>
+
+    <!-- 部门端权限内工单查询（API 9.5）：仅本分类工单；
+         显示规则：只显示部门端在办/待办工单（待确认/待分派/街道办在办/待审核/待处理驳回收单）；
+         审核通过（DEPT_AUDITED）、同意街道办驳回（DEPT_REJECTED）、申请驳回（PENDING_REASSIGN）、
+         已办结/已归档（CLOSED/ARCHIVED/RETURNED）及管理端待分派池（PENDING_DISPATCH）一律不显示 -->
+    <select id="selectPageDept" resultType="map">
+        SELECT id, order_no, title, content, category, sub_category, level, region, department,
+               street_office, status, is_overdue, deadline, create_time, update_time,
+               dispose_tag, dept_audit_status, final_audit_status, hit_keywords, confidence,
+               dept_receive_time, street_receive_time
+        FROM dept_work_order
+        WHERE is_deleted = 0
+          AND category = #{category}
+        <if test="countyCode != null and countyCode != ''">AND county_code = #{countyCode}</if>
+          AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN', 'DEPT_AUDITED', 'DEPT_REJECTED',
+                             'CLOSED', 'ARCHIVED', 'RETURNED')
+        <if test="streetOffice != null and streetOffice != ''">AND street_office LIKE CONCAT(#{streetOffice}, '%')</if>
+        <if test="orderNo != null and orderNo != ''">AND order_no = #{orderNo}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="statuses != null and statuses.size() > 0">
+            AND status IN
+            <foreach collection="statuses" item="s" open="(" separator="," close=")">#{s}</foreach>
+        </if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPageDept" resultType="long">
+        SELECT COUNT(1)
+        FROM dept_work_order
+        WHERE is_deleted = 0
+          AND category = #{category}
+        <if test="countyCode != null and countyCode != ''">AND county_code = #{countyCode}</if>
+          AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN', 'DEPT_AUDITED', 'DEPT_REJECTED',
+                             'CLOSED', 'ARCHIVED', 'RETURNED')
+        <if test="streetOffice != null and streetOffice != ''">AND street_office LIKE CONCAT(#{streetOffice}, '%')</if>
+        <if test="orderNo != null and orderNo != ''">AND order_no = #{orderNo}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="statuses != null and statuses.size() > 0">
+            AND status IN
+            <foreach collection="statuses" item="s" open="(" separator="," close=")">#{s}</foreach>
+        </if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+    </select>
+
+    <!-- 待部门审核列表（API 11.2.1）：待市民评价(PENDING_EVALUATE)/已评价(EVALUATED)/街道办已处理(STREET_DONE)，本分类过滤 -->
+    <select id="selectAuditingList" resultType="map">
+        SELECT id, order_no, title AS summary, street_office, dispose_tag, dispose_time,
+               is_overdue, level, category, dept_return_count
+        FROM dept_work_order
+        WHERE is_deleted = 0 AND status IN ('PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE')
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="countyCode != null and countyCode != ''">AND county_code = #{countyCode}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+        <if test="startTime != null">AND dispose_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND dispose_time &lt;= #{endTime}</if>
+        ORDER BY dispose_time ASC, id ASC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countAuditingList" resultType="long">
+        SELECT COUNT(1)
+        FROM dept_work_order
+        WHERE is_deleted = 0 AND status IN ('PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE')
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="countyCode != null and countyCode != ''">AND county_code = #{countyCode}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+        <if test="startTime != null">AND dispose_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND dispose_time &lt;= #{endTime}</if>
+    </select>
+
+    <!-- 部门工作台统计（本分类工单概况）：
+         pending_handle 待处理 = 在办（PENDING_STREET_PROCESS）+ 待重新分派（PENDING_DEPT_ASSIGN/STREET_REJECTED）
+         pending_verify 待审核 = PENDING_DEPT_PROCESS；pending_assign 待分派 = PENDING_DEPT_ASSIGN
+         pending_audit 待部门审核 = 待市民评价(PENDING_EVALUATE)/已评价(EVALUATED)/街道办已处理(STREET_DONE)；DEPT_AUDITED 部门已办结不计入待办 -->
+    <select id="workbenchSummary" resultType="map">
+        SELECT
+            COUNT(*)                 AS order_total,
+            SUM(CASE WHEN status = 'PENDING_STREET_PROCESS'
+                      OR status IN ('PENDING_DEPT_ASSIGN', 'STREET_REJECTED')
+                     THEN 1 ELSE 0 END) AS pending_handle,
+            SUM(CASE WHEN status = 'PENDING_DEPT_PROCESS' THEN 1 ELSE 0 END) AS pending_verify,
+            SUM(CASE WHEN status = 'PENDING_DEPT_ASSIGN' THEN 1 ELSE 0 END) AS pending_assign,
+            SUM(CASE WHEN status IN ('PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE') THEN 1 ELSE 0 END) AS pending_audit,
+            SUM(CASE WHEN year(dispose_time) = #{year} AND month(dispose_time) = #{month} THEN 1 ELSE 0 END) AS month_done,
+            COALESCE(AVG(CASE WHEN dept_score IS NOT NULL THEN dept_score END), 0) AS avg_score
+        FROM dept_work_order
+        WHERE is_deleted = 0
+          AND category = #{category}
+          AND county_code = #{countyCode}
+    </select>
+
+    <!-- 部门汇总上报（API 11.2.7）：按街道办聚合处置统计 -->
+    <select id="selectDeptReport" resultType="map">
+        SELECT street_office,
+               COUNT(1) AS cnt,
+               IFNULL(ROUND(AVG(dept_score), 1), 0) AS avg_score,
+               SUM(CASE WHEN dept_audit_status = 'APPROVED' THEN 1 ELSE 0 END) AS approved,
+               SUM(CASE WHEN is_overdue = 1 THEN 1 ELSE 0 END) AS overdue,
+               IFNULL(ROUND(AVG(TIMESTAMPDIFF(HOUR, create_time, dispose_time)), 1), 0) AS avg_hours
+        FROM dept_work_order
+        WHERE is_deleted = 0 AND category = #{department}
+        <if test="countyCode != null and countyCode != ''">AND county_code = #{countyCode}</if>
+          AND dispose_time IS NOT NULL AND dispose_time &gt;= #{start}
+        GROUP BY street_office
+        ORDER BY cnt DESC
+    </select>
+
+    <!-- 部门端诉求趋势折线图（工作台「本部门诉求趋势」）：按一级/二级分类统计每日诉求量
+         只读部门端副本表 dept_work_order；category 由服务层锁定为登录部门 user_type，前端不可越权
+         region 过滤：工单 region 为「区县+街道/点位」拼接（如"海港区新城区"），按前缀匹配只筛到区级、不下钻街道 -->
+    <select id="selectDailyCounts" resultType="map">
+        SELECT DATE_FORMAT(create_time, '%Y-%m-%d') AS stat_date, COUNT(*) AS stat_count
+        FROM dept_work_order
+        <where>
+            is_deleted = 0
+            AND category IS NOT NULL
+            AND category = #{category}
+            <if test="subCategory != null and subCategory != ''">
+                AND sub_category = #{subCategory}
+            </if>
+            <if test="region != null and region != ''">
+                AND region LIKE CONCAT(#{region}, '%')
+            </if>
+            <if test="countyCode != null and countyCode != ''">
+                AND county_code = #{countyCode}
+            </if>
+            AND create_time &gt;= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        </where>
+        GROUP BY DATE_FORMAT(create_time, '%Y-%m-%d')
+        ORDER BY stat_date
+    </select>
+
+</mapper>

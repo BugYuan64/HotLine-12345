@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.common.UnreadMapper">
+
+    <!-- ==================== 游标读写（sys_module_read） ==================== -->
+
+    <select id="selectLastViewed" resultType="java.time.LocalDateTime">
+        SELECT last_viewed_at
+        FROM sys_module_read
+        WHERE user_id = #{userId} AND module = #{module}
+        LIMIT 1
+    </select>
+
+    <insert id="upsertLastViewed">
+        INSERT INTO sys_module_read (user_id, module, last_viewed_at)
+        VALUES (#{userId}, #{module}, #{lastViewedAt})
+        -- 只增不减：多实例时钟偏移时较旧的实例写入会回退游标使旧数据重新计入，故仅当新时间更晚时覆盖
+        ON DUPLICATE KEY UPDATE last_viewed_at =
+            IF(last_viewed_at IS NULL OR last_viewed_at &lt; #{lastViewedAt}, #{lastViewedAt}, last_viewed_at)
+    </insert>
+
+    <!-- ==================== 未读计数 ==================== -->
+
+    <!-- 父诉求（管理端全量） -->
+    <select id="countAppealParentNew" resultType="long">
+        SELECT COUNT(1) FROM appeal_parent WHERE create_time &gt; #{after}
+    </select>
+
+    <!-- 子诉求（管理端全量） -->
+    <select id="countAppealChildNew" resultType="long">
+        SELECT COUNT(1) FROM appeal_child WHERE create_time &gt; #{after}
+    </select>
+
+    <!-- 工单（管理端全量：admin_work_order 权威副本） -->
+    <select id="countWorkOrderNew" resultType="long">
+        SELECT COUNT(1) FROM admin_work_order WHERE is_deleted = 0 AND is_archived = 0 AND create_time &gt; #{after}
+    </select>
+
+    <!-- 工单待分配数（管理端实时待办，不按游标）：= PENDING_DISPATCH 待分派工单数 -->
+    <select id="countWorkOrderUnassigned" resultType="long">
+        SELECT COUNT(1) FROM admin_work_order WHERE is_deleted = 0 AND status = 'PENDING_DISPATCH'
+    </select>
+
+    <!-- 工单（部门端：本分类+本区县，按到达本部门时间；查部门端副本表） -->
+    <select id="countWorkOrderNewByCategory" resultType="long">
+        SELECT COUNT(1) FROM dept_work_order
+        WHERE is_deleted = 0 AND dept_receive_time &gt; #{after}
+          AND category = #{category}
+        <if test="countyCode != null and countyCode != ''">AND county_code = #{countyCode}</if>
+    </select>
+
+    <!-- 工单（街道办端：本辖区，按到达街道办时间；查街道办端副本表） -->
+    <select id="countWorkOrderNewByStreet" resultType="long">
+        SELECT COUNT(1) FROM street_work_order
+        WHERE is_deleted = 0 AND street_receive_time &gt; #{after} AND street_office = #{streetOffice}
+    </select>
+
+    <!-- 预警记录（管理端全量，按触发时间） -->
+    <select id="countWarningNew" resultType="long">
+        SELECT COUNT(1) FROM warning_record WHERE trigger_time &gt; #{after}
+    </select>
+
+    <!-- 预警记录（部门端：已发送 + 归属本部门，按发送给部门时间），口径同 countStaffPage：
+         归属判定为 department 含本分类code（全市）或「区县:分类」复合键（56部门口径） -->
+    <select id="countWarningNewByCategory" resultType="long">
+        SELECT COUNT(1) FROM warning_record
+        WHERE status = 'SENT' AND dept_sent_time &gt; #{after}
+          AND (FIND_IN_SET(#{category}, department) > 0
+               OR FIND_IN_SET(CONCAT(#{countyCode}, ':', #{category}), department) > 0)
+    </select>
+
+    <!-- 预警记录（街道办端：已发送 + 分发给本街道，按分发时间），口径同 countStreetPage -->
+    <select id="countWarningNewByStreet" resultType="long">
+        SELECT COUNT(1)
+        FROM warning_street_dispatch d
+        JOIN warning_record w ON w.id = d.warning_id
+        WHERE w.status = 'SENT' AND d.dispatch_time &gt; #{after} AND d.street_office = #{streetOffice}
+    </select>
+
+    <!-- 敏感事件（管理端全量，按触发时间） -->
+    <select id="countSensitiveEventNew" resultType="long">
+        SELECT COUNT(1) FROM sensitive_event WHERE trigger_time &gt; #{after}
+    </select>
+
+    <!-- 系统审计（管理端：admin_audit_log 仅管理端操作，无需排除「收到工单」） -->
+    <select id="countAuditSysNew" resultType="long">
+        SELECT COUNT(1) FROM admin_audit_log
+        WHERE create_time &gt; #{after}
+    </select>
+
+    <!-- 部门审计（管理端）：dept_audit_log 内全部为部门端相关记录 -->
+    <select id="countAuditDeptNew" resultType="long">
+        SELECT COUNT(1) FROM dept_audit_log
+        WHERE create_time &gt; #{after}
+    </select>
+
+    <!-- 街道办审计（管理端）：street_audit_log 内全部为街道办端相关记录 -->
+    <select id="countAuditStreetNew" resultType="long">
+        SELECT COUNT(1) FROM street_audit_log
+        WHERE create_time &gt; #{after}
+    </select>
+
+    <!-- 系统审计（部门端视角）：本区县本部门账号操作 + 归属本区县本部门的收到工单（56部门口径） -->
+    <select id="countAuditNewByDept" resultType="long">
+        SELECT COUNT(1) FROM dept_audit_log l
+        WHERE l.create_time &gt; #{after}
+          AND (
+                (l.operator IN (SELECT CONCAT(u.user_type, '-', u.job_no) FROM sys_user u
+                                WHERE u.is_deleted = 0 AND u.user_type = #{dept}
+                                  AND (u.region_code = #{countyCode} OR #{countyCode} IS NULL))
+                 AND NOT (l.module = 'order-receive'))
+                OR
+                (l.module = 'order-receive'
+                 AND (l.target_type = #{dept}
+                      OR l.target_type = CONCAT(#{dept}, ':', #{countyCode})))
+              )
+    </select>
+
+    <!-- 系统审计（街道办端视角）：本账号操作 + 归属本街道的收到工单 -->
+    <select id="countAuditNewByStreet" resultType="long">
+        SELECT COUNT(1) FROM street_audit_log
+        WHERE create_time &gt; #{after}
+          AND (
+                (operator = #{operator} AND NOT (module = 'order-receive'))
+                OR
+                (module = 'order-receive' AND target_type = #{targetType})
+              )
+    </select>
+
+    <!-- 账号审核（管理端：新提交的审核申请，申请时间缺失时回退创建时间） -->
+    <select id="countAccountAuditNew" resultType="long">
+        SELECT COUNT(1) FROM sys_account_audit
+        WHERE COALESCE(apply_time, create_time) &gt; #{after}
+    </select>
+
+    <!-- 终审归档新增（管理端）：新归档的工单（按归档时间与游标比较；update_time 会随归档后编辑刷新导致误亮） -->
+    <select id="countFinalAuditNew" resultType="long">
+        SELECT COUNT(1) FROM admin_order_archive
+        WHERE is_deleted = 0 AND is_archived = 1
+          AND archive_time &gt; #{after}
+    </select>
+
+    <!-- 终审归档新增（管理端）：新归档的工单（按归档更新时间） -->
+</mapper>

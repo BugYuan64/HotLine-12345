@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.PredictionResultMapper">
+
+    <sql id="baseColumns">
+        id, period, category, sub_category, region, county_code, county_name, street_code, street_name, predicted_count, confidence, actual_count, hit_status, create_time
+    </sql>
+
+    <insert id="insertBatch">
+        INSERT INTO prediction_result (period, category, sub_category, region, county_code, county_name, street_code, street_name, predicted_count, confidence)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.period}, #{item.category}, #{item.subCategory}, #{item.region}, #{item.countyCode}, #{item.countyName}, #{item.streetCode}, #{item.streetName}, #{item.predictedCount}, #{item.confidence})
+        </foreach>
+    </insert>
+
+    <select id="selectPage" resultType="org.tjetc.backend.entity.admin.PredictionResult">
+        SELECT <include refid="baseColumns"/>
+        FROM prediction_result
+        <where>
+            <if test="category != null and category != ''">AND category = #{category}</if>
+            <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+            <if test="period != null and period != ''">AND period = #{period}</if>
+        </where>
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1) FROM prediction_result
+        <where>
+            <if test="category != null and category != ''">AND category = #{category}</if>
+            <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+            <if test="period != null and period != ''">AND period = #{period}</if>
+        </where>
+    </select>
+
+    <!-- 预判动态下钻：取满足筛选条件的最近一批预判结果（若最近一批在指定区县/分类/周期下无数据，
+        回退到该筛选条件下最近的一批，避免误报"无法预测"） -->
+    <select id="selectLatest" resultType="org.tjetc.backend.entity.admin.PredictionResult">
+        SELECT <include refid="baseColumns"/>
+        FROM prediction_result
+        WHERE create_time = (
+            SELECT MAX(create_time) FROM prediction_result
+            <where>
+                <if test="category != null and category != ''">AND category = #{category}</if>
+                <if test="subCategory != null and subCategory != ''">AND sub_category = #{subCategory}</if>
+                <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+                <if test="period != null and period != ''">AND period = #{period}</if>
+            </where>
+        )
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="subCategory != null and subCategory != ''">AND sub_category = #{subCategory}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+        <if test="period != null and period != ''">AND period = #{period}</if>
+        ORDER BY predicted_count DESC, id ASC
+    </select>
+
+    <select id="selectFilled" resultType="org.tjetc.backend.entity.admin.PredictionResult">
+        SELECT <include refid="baseColumns"/>
+        FROM prediction_result
+        WHERE actual_count IS NOT NULL
+    </select>
+
+    <select id="selectUnfilled" resultType="org.tjetc.backend.entity.admin.PredictionResult">
+        SELECT <include refid="baseColumns"/>
+        FROM prediction_result
+        WHERE actual_count IS NULL
+    </select>
+
+    <update id="updateActual">
+        UPDATE prediction_result
+        SET actual_count = #{actualCount}, hit_status = #{hitStatus}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

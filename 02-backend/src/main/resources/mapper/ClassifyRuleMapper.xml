@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.ClassifyRuleMapper">
+
+    <sql id="baseColumns">
+        id, category_id, hit_count_threshold, weight_sum_threshold
+    </sql>
+
+    <select id="selectAllWithCategory" resultType="map">
+        SELECT r.id, r.category_id, r.hit_count_threshold, r.weight_sum_threshold,
+               c.primary_category
+        FROM classify_rule r
+        JOIN classify_category c ON c.id = r.category_id
+        ORDER BY c.primary_category
+    </select>
+
+    <select id="selectByCategoryId" resultType="org.tjetc.backend.entity.admin.ClassifyRule">
+        SELECT <include refid="baseColumns"/>
+        FROM classify_rule
+        WHERE category_id = #{categoryId}
+        LIMIT 1
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.ClassifyRule" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO classify_rule (category_id, hit_count_threshold, weight_sum_threshold)
+        VALUES (#{categoryId}, #{hitCountThreshold}, #{weightSumThreshold})
+    </insert>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.admin.ClassifyRule">
+        UPDATE classify_rule
+        SET hit_count_threshold = #{hitCountThreshold}, weight_sum_threshold = #{weightSumThreshold}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

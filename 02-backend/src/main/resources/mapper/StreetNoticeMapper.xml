@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 街道办端通知收件箱（street_notice）：发布方扇出的街道办级快照，含已读状态 -->
+<mapper namespace="org.tjetc.backend.mapper.street.StreetNoticeMapper">
+
+    <select id="selectReceived" resultType="org.tjetc.backend.dto.NoticeVO">
+        SELECT notice_id AS id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, street_name, is_read, read_time, create_time
+        FROM street_notice
+        WHERE street_name = #{streetName} AND status = 1
+        <if test="publisherType != null and publisherType != ''">AND publisher_type = #{publisherType}</if>
+        <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+        ORDER BY top_flag DESC, create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countReceived" resultType="long">
+        SELECT COUNT(1)
+        FROM street_notice
+        WHERE street_name = #{streetName} AND status = 1
+        <if test="publisherType != null and publisherType != ''">AND publisher_type = #{publisherType}</if>
+        <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+    </select>
+
+    <select id="selectByNoticeAndStreet" resultType="org.tjetc.backend.dto.NoticeVO">
+        SELECT notice_id AS id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, street_name, is_read, read_time, create_time
+        FROM street_notice
+        WHERE notice_id = #{noticeId} AND street_name = #{streetName}
+        LIMIT 1
+    </select>
+
+    <update id="markRead">
+        UPDATE street_notice
+        SET is_read = 1, read_time = COALESCE(read_time, NOW())
+        WHERE notice_id = #{noticeId} AND street_name = #{streetName} AND is_read = 0
+    </update>
+
+    <select id="countUnread" resultType="long">
+        SELECT COUNT(1) FROM street_notice
+        WHERE street_name = #{streetName} AND status = 1 AND is_read = 0
+    </select>
+
+    <delete id="deleteByNoticeId">
+        DELETE FROM street_notice WHERE notice_id = #{noticeId}
+    </delete>
+
+    <update id="updateStatusByNoticeId">
+        UPDATE street_notice SET status = #{status} WHERE notice_id = #{noticeId}
+    </update>
+
+    <update id="propagateEdit">
+        UPDATE street_notice
+        SET title = #{title}, content = #{content}, summary = #{summary}
+        WHERE notice_id = #{noticeId}
+    </update>
+
+    <delete id="deleteByNoticeAndName">
+        DELETE FROM street_notice WHERE notice_id = #{noticeId} AND street_name = #{streetName}
+    </delete>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.StreetNotice" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO street_notice (notice_id, title, content, summary, publisher, publisher_type, publisher_dept,
+                                   top_flag, status, street_name, is_read, create_time)
+        VALUES (#{noticeId}, #{title}, #{content}, #{summary}, #{publisher}, #{publisherType}, #{publisherDept},
+                #{topFlag}, #{status}, #{streetName}, 0, #{createTime})
+    </insert>
+
+</mapper>

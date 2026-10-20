@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.PredictionTrendMapper">
+
+    <sql id="baseColumns">
+        id, period, trend_date, predicted, confidence, create_time
+    </sql>
+
+    <insert id="insertBatch">
+        INSERT INTO prediction_trend (period, trend_date, predicted, confidence)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.period}, #{item.trendDate}, #{item.predicted}, #{item.confidence})
+        </foreach>
+    </insert>
+
+    <select id="selectLatest" resultType="org.tjetc.backend.entity.admin.PredictionTrend">
+        SELECT <include refid="baseColumns"/>
+        FROM prediction_trend
+        WHERE period = #{period}
+          AND create_time = (SELECT MAX(create_time) FROM prediction_trend WHERE period = #{period})
+        ORDER BY id
+    </select>
+
+</mapper>

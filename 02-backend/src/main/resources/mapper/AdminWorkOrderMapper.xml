@@ -1,0 +1,649 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.AdminWorkOrderMapper">
+
+    <sql id="baseColumns">
+        id, order_no, source_appeal_id, title, content, category, sub_category, level,
+        attention_count, confidence, hit_keywords, need_review, region, county_code, county_name, department,
+        street_office, dept_receive_time, street_receive_time, street_code, street_name, address_detail, is_broad, status, same_source_order_id, event_type, dispose_plan, dispose_result,
+        dispose_tag, dispose_time, dispose_user_id, dispose_user_name, deadline,
+        is_overdue, delay_count, street_return_count, dept_return_count,
+        dept_audit_status, dept_audit_time, dept_audit_user_id, dept_audit_user_name,
+        dept_audit_remark, dept_score, dept_score_time, final_audit_status,
+        final_audit_time, final_audit_user_id, final_audit_user_name, final_audit_remark,
+        final_reject_target, archive_time, archive_type, is_archived, reopen_count,
+        close_time, is_deleted, create_time, update_time
+    </sql>
+
+    <!-- ==================== P0-3 预判聚合 ==================== -->
+
+    <!-- 区县归一化：工单 region 为“区县+街道/点位”拼接（如“海港区新城区”），按前缀归并到区县级，供预判/预警统一下钻 -->
+    <sql id="regionNormExpr">
+        CASE
+            WHEN region LIKE '海港区%' THEN '海港区'
+            WHEN region LIKE '山海关区%' THEN '山海关区'
+            WHEN region LIKE '北戴河区%' THEN '北戴河区'
+            WHEN region LIKE '抚宁区%' THEN '抚宁区'
+            WHEN region LIKE '昌黎县%' THEN '昌黎县'
+            WHEN region LIKE '卢龙县%' THEN '卢龙县'
+            WHEN region LIKE '青龙满族自治县%' THEN '青龙满族自治县'
+            ELSE region
+        END
+    </sql>
+
+    <select id="aggregateDailyByCategoryRegion" resultType="map">
+        SELECT DATE_FORMAT(create_time, '%Y%m%d') AS d,
+               category,
+               COALESCE(NULLIF(sub_category, ''), '') AS sub_category,
+               <include refid="regionNormExpr"/> AS region_norm,
+               COUNT(1) AS cnt
+        FROM admin_work_order
+        WHERE is_deleted = 0
+          AND category IS NOT NULL
+          AND region IS NOT NULL
+          AND create_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        GROUP BY d, category, sub_category, region_norm
+    </select>
+
+    <select id="selectRecentTexts" resultType="map">
+        SELECT category,
+               COALESCE(NULLIF(sub_category, ''), '') AS sub_category,
+               <include refid="regionNormExpr"/> AS region_norm,
+               title, content
+        FROM admin_work_order
+        WHERE is_deleted = 0
+          AND category IS NOT NULL
+          AND region IS NOT NULL
+          AND create_time >= DATE_SUB(CURDATE(), INTERVAL #{days} DAY)
+        ORDER BY create_time DESC
+        LIMIT 5000
+    </select>
+
+    <select id="countActualForPrediction" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0
+          AND category = #{category}
+          <if test="subCategory != null and subCategory != ''">AND sub_category = #{subCategory}</if>
+          <!-- region 为空时不过滤（LIKE NULL 会恒不匹配导致误计为 0 / 误判 MISS） -->
+          <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+          AND create_time >= #{start}
+          AND create_time &lt; #{end}
+    </select>
+
+    <!-- ==================== P0-4 分类准确率统计（API 7.7） ==================== -->
+
+    <select id="overallAccuracy" resultType="double">
+        SELECT IFNULL(ROUND(AVG(confidence), 4), 0)
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND category IS NOT NULL AND confidence IS NOT NULL
+          AND create_time >= #{start}
+        <if test="category != null and category != ''">AND category = #{category}</if>
+    </select>
+
+    <select id="accuracyByCategory" resultType="map">
+        SELECT category, ROUND(AVG(confidence), 4) AS accuracy, COUNT(1) AS cnt
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND category IS NOT NULL AND confidence IS NOT NULL
+          AND create_time >= #{start}
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        GROUP BY category
+        ORDER BY category
+    </select>
+
+    <select id="countClassified" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND category IS NOT NULL AND confidence IS NOT NULL
+          AND create_time >= #{start}
+        <if test="category != null and category != ''">AND category = #{category}</if>
+    </select>
+
+    <!-- ==================== P0-6 工单流转闭环 ==================== -->
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM admin_work_order
+        WHERE id = #{id} AND is_deleted = 0
+    </select>
+
+    <!-- 自动派单按需取一张：待分派且已确定部门（分类成功未分派）的工单 -->
+    <select id="selectOnePendingDispatch" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND status = 'PENDING_DISPATCH'
+          AND department IS NOT NULL AND department &lt;&gt; ''
+        LIMIT 1
+    </select>
+
+    <!-- 原子领取自动派单：CAS 推进状态，仅待分派工单可领取（受影响行数=1 表示本方赢得分派） -->
+    <update id="claimAutoDispatch">
+        UPDATE admin_work_order
+        SET status = 'PENDING_DEPT_PROCESS', dept_receive_time = #{receiveTime}
+        WHERE id = #{id} AND status = 'PENDING_DISPATCH' AND is_deleted = 0
+    </update>
+
+    <!-- 待分派工单数（自动派单状态展示，含未确定部门的降级工单） -->
+    <select id="countPendingDispatch" resultType="long">
+        SELECT COUNT(1) FROM admin_work_order WHERE is_deleted = 0 AND status = 'PENDING_DISPATCH'
+    </select>
+
+    <!-- 未删除工单总数（工单页分派完成率分母） -->
+    <select id="countAllNotDeleted" resultType="long">
+        SELECT COUNT(1) FROM admin_work_order WHERE is_deleted = 0
+    </select>
+
+    <select id="selectBySourceAppealId" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM admin_work_order
+        WHERE source_appeal_id = #{appealId} AND is_deleted = 0
+        ORDER BY id
+        LIMIT 1
+    </select>
+
+    <!-- ==================== 第二阶段去重归并 ==================== -->
+
+    <!-- 归并候选（AI 相似度兜底）：同分类的近期未归档工单；region 放宽匹配（null/空/前缀互相包含均纳入） -->
+    <select id="selectMergeCandidates" resultType="map">
+        SELECT id, order_no, title, content, event_type
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND is_archived = 0
+          AND category = #{category}
+          <!-- 归并以二级分类为准：子诉求有二级时只匹配同二级工单；二级为空（历史数据）退化为仅一级 -->
+          <if test="subCategory != null and subCategory != ''">AND sub_category = #{subCategory}</if>
+          AND (
+              region = #{region}
+              OR region IS NULL OR region = ''
+              OR region LIKE CONCAT(#{region}, '%')
+              OR #{region} LIKE CONCAT(region, '%')
+          )
+          AND create_time >= #{start}
+        ORDER BY id ASC
+        LIMIT #{limit}
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.WorkOrder" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO admin_work_order (order_no, source_appeal_id, title, content, category, sub_category, level,
+                                attention_count, confidence, hit_keywords, need_review, region, county_code, county_name, department,
+                                street_office, street_code, street_name, address_detail, is_broad, status, same_source_order_id, event_type, deadline)
+        VALUES (#{orderNo}, #{sourceAppealId}, #{title}, #{content}, #{category}, #{subCategory}, #{level},
+                #{attentionCount}, #{confidence}, #{hitKeywords}, #{needReview}, #{region}, #{countyCode}, #{countyName}, #{department},
+                #{streetOffice}, #{streetCode}, #{streetName}, #{addressDetail}, #{isBroad}, #{status}, #{sameSourceOrderId}, #{eventType}, #{deadline})
+    </insert>
+
+    <!-- 全字段更新（服务层先查后改；状态变更必须配合 order_log 写入，禁止绕过） -->
+    <update id="update" parameterType="org.tjetc.backend.entity.common.WorkOrder">
+        UPDATE admin_work_order
+        SET order_no = #{orderNo},
+            source_appeal_id = #{sourceAppealId},
+            title = #{title},
+            content = #{content},
+            category = #{category},
+            sub_category = #{subCategory},
+            level = #{level},
+            attention_count = #{attentionCount},
+            confidence = #{confidence},
+            hit_keywords = #{hitKeywords},
+            need_review = #{needReview},
+            region = #{region},
+            county_code = #{countyCode},
+            county_name = #{countyName},
+            department = #{department},
+            street_office = #{streetOffice},
+            dept_receive_time = #{deptReceiveTime},
+            street_receive_time = #{streetReceiveTime},
+            street_code = #{streetCode},
+            street_name = #{streetName},
+            address_detail = #{addressDetail},
+            is_broad = #{isBroad},
+            status = #{status},
+            same_source_order_id = #{sameSourceOrderId},
+            event_type = #{eventType},
+            dispose_plan = #{disposePlan},
+            dispose_result = #{disposeResult},
+            dispose_tag = #{disposeTag},
+            dispose_time = #{disposeTime},
+            dispose_user_id = #{disposeUserId},
+            dispose_user_name = #{disposeUserName},
+            deadline = #{deadline},
+            is_overdue = #{isOverdue},
+            delay_count = #{delayCount},
+            street_return_count = #{streetReturnCount},
+            dept_return_count = #{deptReturnCount},
+            dept_audit_status = #{deptAuditStatus},
+            dept_audit_time = #{deptAuditTime},
+            dept_audit_user_id = #{deptAuditUserId},
+            dept_audit_user_name = #{deptAuditUserName},
+            dept_audit_remark = #{deptAuditRemark},
+            dept_score = #{deptScore},
+            dept_score_time = #{deptScoreTime},
+            final_audit_status = #{finalAuditStatus},
+            final_audit_time = #{finalAuditTime},
+            final_audit_user_id = #{finalAuditUserId},
+            final_audit_user_name = #{finalAuditUserName},
+            final_audit_remark = #{finalAuditRemark},
+            final_reject_target = #{finalRejectTarget},
+            archive_time = #{archiveTime},
+            archive_type = #{archiveType},
+            is_completed = #{isCompleted},
+            is_archived = #{isArchived},
+            reopen_count = #{reopenCount},
+            close_time = #{closeTime},
+            is_deleted = #{isDeleted}
+        WHERE id = #{id}
+    </update>
+
+    <!-- ==================== P1 管理端工单管理（API 6.2/6.5/6.7） ==================== -->
+
+    <!-- 管理端工单多条件分页查询（API 6.2）；archived：null=不过滤 / 0=未归档（工单管理）/ 1=已归档（终审归档页） -->
+    <select id="selectPage" resultType="map">
+        SELECT id, order_no, title, content, category, sub_category, level, attention_count, event_type, confidence,
+               hit_keywords, need_review, region, department, street_office, status, is_overdue,
+               dispose_tag, create_time, close_time
+        FROM admin_work_order
+        WHERE is_deleted = 0
+        <if test="archived != null">AND is_archived = #{archived}</if>
+        <if test="orderNo != null and orderNo != ''">AND order_no LIKE CONCAT('%', #{orderNo}, '%')</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="level != null and level != ''">AND level = #{level}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="startDate != null and startDate != ''">AND create_time >= #{startDate}</if>
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="selectExportByIds" resultType="map">
+        SELECT id, order_no, title, content, region, level, status
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY create_time DESC, id DESC
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0
+        <if test="archived != null">AND is_archived = #{archived}</if>
+        <if test="orderNo != null and orderNo != ''">AND order_no LIKE CONCAT('%', #{orderNo}, '%')</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="level != null and level != ''">AND level = #{level}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="startDate != null and startDate != ''">AND create_time >= #{startDate}</if>
+    </select>
+
+    <select id="countPendingPage" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND status = 'PENDING_DISPATCH'
+        <if test="archived != null">AND is_archived = #{archived}</if>
+        <if test="orderNo != null and orderNo != ''">AND order_no LIKE CONCAT('%', #{orderNo}, '%')</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="level != null and level != ''">AND level = #{level}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="startDate != null and startDate != ''">AND create_time >= #{startDate}</if>
+    </select>
+
+    <!-- 工单编号当日序号（WO+日期+序号，含已删除避免编号复用） -->
+    <select id="countByPrefix" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE order_no LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+    <!-- 逻辑删除（API 6.7）：保留历史可追溯 -->
+    <update id="deleteById">
+        UPDATE admin_work_order SET is_deleted = 1 WHERE id = #{id} AND is_deleted = 0
+    </update>
+
+    <!-- 终审归档列表（新流程）：归档工单只读列表（含驳回后最终分类/辖区/街道办/创建与完成时间） -->
+    <select id="selectFinalAuditing" resultType="map">
+        SELECT id, order_no, title AS summary, department, street_office, dispose_tag,
+               dept_audit_user_name, dept_audit_time, is_overdue, level, category,
+               sub_category, region, create_time, close_time, archive_time
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+        ORDER BY archive_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countFinalAuditing" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+    </select>
+
+    <!-- 归档数据列表（API 11.3.7） -->
+    <select id="selectArchives" resultType="map">
+        SELECT id, order_no, title AS summary, department, street_office, category, level,
+               archive_time, archive_type, close_time
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="year != null and year != ''">AND YEAR(archive_time) = #{year}</if>
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        ORDER BY archive_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countArchives" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="year != null and year != ''">AND YEAR(archive_time) = #{year}</if>
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+    </select>
+
+    <!-- 重开申请列表（API 11.3.8，审批列表按需求补充） -->
+    <select id="selectReopenApplications" resultType="map">
+        SELECT w.id, w.order_no, w.title AS summary, w.category, w.level, w.street_office,
+               e.score, e.label, e.reopen_reason, e.reopen_status, e.citizen_phone, e.evaluate_time
+        FROM admin_work_order w
+        JOIN order_evaluate e ON e.order_id = w.id
+        WHERE w.is_deleted = 0 AND e.is_reopen_applied = 1 AND e.reopen_status = 'PENDING'
+        ORDER BY e.evaluate_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countReopenApplications" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order w
+        JOIN order_evaluate e ON e.order_id = w.id
+        WHERE w.is_deleted = 0 AND e.is_reopen_applied = 1 AND e.reopen_status = 'PENDING'
+    </select>
+
+    <!-- 权限内工单查询（API 9.5）：department/streetOffice 二选一传入实现数据范围过滤 -->
+    <select id="selectPageStaff" resultType="map">
+        SELECT id, order_no, title, content, category, sub_category, level, region, department,
+               street_office, status, is_overdue, deadline, create_time, update_time,
+               dispose_tag, dept_audit_status, final_audit_status, hit_keywords, confidence,
+               dept_receive_time, street_receive_time
+        FROM admin_work_order
+        WHERE is_deleted = 0
+        <if test="department != null and department != ''">
+            AND category = #{department}
+            AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN')
+        </if>
+        <if test="streetOffice != null and streetOffice != ''">
+            AND street_office LIKE CONCAT(#{streetOffice}, '%')
+            AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN', 'PENDING_DEPT_PROCESS', 'PENDING_DEPT_ASSIGN')
+        </if>
+        <if test="orderNo != null and orderNo != ''">AND order_no = #{orderNo}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+        ORDER BY create_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPageStaff" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0
+        <if test="department != null and department != ''">
+            AND category = #{department}
+            AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN')
+        </if>
+        <if test="streetOffice != null and streetOffice != ''">
+            AND street_office LIKE CONCAT(#{streetOffice}, '%')
+            AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN', 'PENDING_DEPT_PROCESS', 'PENDING_DEPT_ASSIGN')
+        </if>
+        <if test="orderNo != null and orderNo != ''">AND order_no = #{orderNo}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt;= #{endTime}</if>
+    </select>
+
+    <!-- 待部门审核列表（API 11.2.1）：PENDING_EVALUATE 待市民评价 / EVALUATED 已评价 / STREET_DONE 街道办已处理 -->
+    <select id="selectAuditingList" resultType="map">
+        SELECT id, order_no, title AS summary, street_office, dispose_tag, dispose_time,
+               is_overdue, level, category, dept_return_count
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND status IN ('PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE')
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+        <if test="startTime != null">AND dispose_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND dispose_time &lt;= #{endTime}</if>
+        ORDER BY dispose_time ASC, id ASC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <!-- 部门/街道办工作台统计（按本部门 category / 街道办 region 过滤）
+         状态机口径（与列表 SQL countPageStaff 对齐）：
+         - PENDING_DISPATCH 待管理端分派：仍在 admin 待办池，部门/街道办不可见，不计入任何待办
+         - PENDING_DEPT_PROCESS 管理端已分派、待部门确认受理（部门端=待审核）
+         - PENDING_DEPT_ASSIGN 部门已确认、待部门分派街道办（部门端=待处理）
+         - PENDING_STREET_PROCESS 街道办在办（街道办=待处理；部门=在途跟进）
+         - STREET_REJECTED 街道办已驳回、待部门处理（部门端=待处理）
+         - STREET_DONE 街道办已处置上报、待部门审核结果（部门端=待审核）
+         - DEPT_AUDITED 部门已审核、转管理端终审：部门已办结，不计入部门待办 -->
+    <select id="workbenchSummary" resultType="map">
+        SELECT
+            COUNT(*)                 AS order_total,
+            SUM(CASE WHEN status = 'PENDING_STREET_PROCESS'
+                     <if test="category != null and category != ''">
+                         OR status IN ('PENDING_DEPT_ASSIGN', 'STREET_REJECTED')
+                     </if>
+                     THEN 1 ELSE 0 END) AS pending_handle,
+            SUM(CASE WHEN status = 'PENDING_DEPT_PROCESS' THEN 1 ELSE 0 END) AS pending_verify,
+            SUM(CASE WHEN status = 'PENDING_DEPT_ASSIGN' THEN 1 ELSE 0 END) AS pending_assign,
+            SUM(CASE WHEN status IN ('PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE') THEN 1 ELSE 0 END) AS pending_audit,
+            SUM(CASE WHEN year(dispose_time) = #{year} AND month(dispose_time) = #{month} THEN 1 ELSE 0 END) AS month_done,
+            COALESCE(AVG(CASE WHEN dept_score IS NOT NULL THEN dept_score END), 0) AS avg_score
+        FROM admin_work_order
+        WHERE is_deleted = 0
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="region != null and region != ''">AND street_office = #{region}</if>
+    </select>
+
+    <select id="countAuditingList" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND status IN ('PENDING_EVALUATE', 'EVALUATED', 'STREET_DONE')
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+        <if test="startTime != null">AND dispose_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND dispose_time &lt;= #{endTime}</if>
+    </select>
+
+    <!-- ==================== 超时/归档定时任务候选 ==================== -->
+
+    <select id="selectOverdueCandidates" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND is_overdue = 0 AND deadline IS NOT NULL
+          AND deadline &lt; NOW()
+          AND status IN ('PENDING_STREET_PROCESS', 'PENDING_EVALUATE', 'STREET_DONE', 'DEPT_AUDITED')
+    </select>
+
+    <select id="selectAutoArchiveCandidates" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND is_archived = 0
+          AND status IN ('CLOSED', 'EVALUATED', 'DEPT_AUDITED')
+          AND close_time &lt;= DATE_SUB(NOW(), INTERVAL 7 DAY)
+    </select>
+
+    <select id="selectPendingReceiveBefore" resultType="org.tjetc.backend.entity.common.WorkOrder">
+        SELECT <include refid="baseColumns"/>
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND status = 'PENDING_STREET_PROCESS'
+          AND create_time &lt;= #{before}
+    </select>
+
+    <!-- 部门汇总上报（API 11.2.7）：按街道办聚合处置统计 -->
+    <select id="selectDeptReport" resultType="map">
+        SELECT street_office,
+               COUNT(1) AS cnt,
+               IFNULL(ROUND(AVG(dept_score), 1), 0) AS avg_score,
+               SUM(CASE WHEN dept_audit_status = 'APPROVED' THEN 1 ELSE 0 END) AS approved,
+               SUM(CASE WHEN is_overdue = 1 THEN 1 ELSE 0 END) AS overdue,
+               IFNULL(ROUND(AVG(TIMESTAMPDIFF(HOUR, create_time, dispose_time)), 1), 0) AS avg_hours
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND category = #{department}
+          AND dispose_time IS NOT NULL AND dispose_time &gt;= #{start}
+        GROUP BY street_office
+        ORDER BY cnt DESC
+    </select>
+
+    <!-- ==================== P0-7 全局数据统计（API 8.4/8.5） ==================== -->
+
+    <sql id="statsFilter">
+        WHERE is_deleted = 0 AND create_time >= #{start}
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+    </sql>
+
+    <!-- 预警预判统计口径（需求：数据来源 = 管理端工单主表全部工单，含已归档行——
+         归档仅翻转主表 is_archived 标记，行不删；归档表为主表全行镜像，仅终审归档页读，避免 UNION 双计） -->
+    <sql id="statsMainFilter">
+        is_deleted = 0 AND create_time >= #{start}
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+    </sql>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(1) FROM admin_work_order WHERE <include refid="statsMainFilter"/>
+    </select>
+
+    <select id="countByStatus" resultType="long">
+        SELECT COUNT(1) FROM admin_work_order WHERE <include refid="statsMainFilter"/> AND status = #{status}
+    </select>
+
+    <!-- 工单状态分布（API 8.4 status_distribution）：按状态统计，随周期/分类/辖区筛选 -->
+    <select id="statusDistribution" resultType="map">
+        SELECT status, COUNT(1) AS cnt
+        FROM admin_work_order WHERE <include refid="statsMainFilter"/>
+        GROUP BY status
+        ORDER BY cnt DESC
+    </select>
+
+    <!-- 管理端待办聚合：按状态统计未删除工单数（不含时间窗口） -->
+    <select id="countTodoByStatus" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE is_deleted = 0 AND status = #{status}
+    </select>
+
+    <select id="countAssigned" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_work_order
+        WHERE <include refid="statsMainFilter"/>
+          AND status NOT IN ('PENDING_DISPATCH', 'PENDING_REASSIGN', 'PENDING_UPDATE', 'WITHDRAWN')
+    </select>
+
+    <select id="categoryDistribution" resultType="map">
+        SELECT category, COUNT(1) AS cnt
+        FROM admin_work_order WHERE <include refid="statsMainFilter"/> AND category IS NOT NULL
+        GROUP BY category
+        ORDER BY cnt DESC
+    </select>
+
+    <!-- 按分类统计已办结工单数量（分类柱状图"完成量"） -->
+    <select id="categoryDoneDistribution" resultType="map">
+        SELECT category, COUNT(1) AS cnt
+        FROM admin_work_order WHERE <include refid="statsMainFilter"/>
+          AND category IS NOT NULL AND status IN ('DEPT_AUDITED', 'EVALUATED')
+        GROUP BY category
+        ORDER BY cnt DESC
+    </select>
+
+    <select id="levelDistribution" resultType="map">
+        SELECT level, COUNT(1) AS cnt
+        FROM admin_work_order WHERE <include refid="statsMainFilter"/>
+        GROUP BY level
+        ORDER BY level
+    </select>
+
+    <select id="trendDaily" resultType="map">
+        SELECT DATE_FORMAT(create_time, '%Y-%m-%d') AS d, COUNT(1) AS cnt
+        FROM admin_work_order WHERE <include refid="statsMainFilter"/>
+        GROUP BY d
+        ORDER BY d
+    </select>
+
+    <!-- 已完成工单趋势：按办结时间（close_time）日聚合完成量（趋势图"完成量"数据源） -->
+    <select id="trendDoneDaily" resultType="map">
+        SELECT DATE_FORMAT(close_time, '%Y-%m-%d') AS d, COUNT(1) AS cnt
+        FROM admin_work_order
+        WHERE is_deleted = 0
+          AND close_time IS NOT NULL
+          AND close_time >= #{start}
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+        GROUP BY d
+        ORDER BY d
+    </select>
+
+    <!-- 预警（P0-5/需求11）：窗口内匹配规则的工单累计关注度（attention_count 求和） -->
+    <select id="sumAttentionForWarning" resultType="long">
+        SELECT COALESCE(SUM(wo.attention_count), 0)
+        FROM admin_work_order wo
+        WHERE wo.is_deleted = 0
+          AND wo.create_time &gt;= #{start}
+        <if test="category != null and category != ''">AND wo.category = #{category}</if>
+        <if test="subCategory != null and subCategory != ''">AND wo.sub_category = #{subCategory}</if>
+        <if test="region != null and region != ''">AND wo.region LIKE CONCAT(#{region}, '%')</if>
+    </select>
+
+    <!-- 预警（P0-5/需求11）：窗口内命中工单的标题+正文（AI 预警总结用） -->
+    <select id="selectWarningTexts" resultType="map">
+        SELECT wo.title, wo.content
+        FROM admin_work_order wo
+        WHERE wo.is_deleted = 0
+          AND wo.create_time &gt;= #{start}
+        <if test="category != null and category != ''">AND wo.category = #{category}</if>
+        <if test="subCategory != null and subCategory != ''">AND wo.sub_category = #{subCategory}</if>
+        <if test="region != null and region != ''">AND wo.region LIKE CONCAT(#{region}, '%')</if>
+        ORDER BY wo.create_time DESC
+        LIMIT 50
+    </select>
+
+    <!-- 预警（需求11）：窗口内命中工单明细（应对措施富文本上下文用） -->
+    <select id="selectWarningContext" resultType="map">
+        SELECT wo.order_no, wo.title, wo.content, wo.category, wo.sub_category,
+               wo.region, wo.attention_count, wo.status
+        FROM admin_work_order wo
+        WHERE wo.is_deleted = 0
+          AND wo.create_time &gt;= #{start}
+        <if test="category != null and category != ''">AND wo.category = #{category}</if>
+        <if test="subCategory != null and subCategory != ''">AND wo.sub_category = #{subCategory}</if>
+        <if test="region != null and region != ''">AND wo.region LIKE CONCAT(#{region}, '%')</if>
+        ORDER BY wo.attention_count DESC, wo.create_time DESC
+        LIMIT 20
+    </select>
+
+    <!-- 预警规则二级分类建议（API 8.1）：按一级分类取已用到的二级分类去重 -->
+    <select id="selectDistinctSubCategory" resultType="string">
+        SELECT wo.sub_category
+        FROM admin_work_order wo
+        WHERE wo.is_deleted = 0
+          AND wo.sub_category IS NOT NULL AND wo.sub_category != ''
+        <if test="category != null and category != ''">AND wo.category = #{category}</if>
+        GROUP BY wo.sub_category
+        ORDER BY wo.sub_category
+        LIMIT 50
+    </select>
+
+</mapper>

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.common.SysRegionMapper">
+
+    <sql id="baseColumns">
+        id, region_code, region_name, level, parent_code, sort_order, status, create_time, update_time
+    </sql>
+
+    <!-- 全部区县（level=COUNTY 且启用） -->
+    <select id="selectCounties" resultType="org.tjetc.backend.entity.common.SysRegion">
+        SELECT <include refid="baseColumns"/>
+        FROM sys_region
+        WHERE level = 'COUNTY' AND status = 'ENABLED'
+        ORDER BY sort_order ASC, id ASC
+    </select>
+
+    <!-- 某区县下的街道/镇/乡（parent_code 命中且 level 属于乡镇级） -->
+    <select id="selectChildrenByParent" resultType="org.tjetc.backend.entity.common.SysRegion">
+        SELECT <include refid="baseColumns"/>
+        FROM sys_region
+        WHERE parent_code = #{parentCode}
+          AND level IN ('STREET', 'TOWN', 'TOWNSHIP')
+          AND status = 'ENABLED'
+        ORDER BY sort_order ASC, id ASC
+    </select>
+
+    <!-- 按区划编码精确查询（校验用，不限启用状态以便精确提示） -->
+    <select id="selectByCode" resultType="org.tjetc.backend.entity.common.SysRegion">
+        SELECT <include refid="baseColumns"/>
+        FROM sys_region
+        WHERE region_code = #{regionCode}
+        LIMIT 1
+    </select>
+
+    <!-- 按中文名 + 层级反查区划编码 -->
+    <select id="selectCodeByNameAndLevel" resultType="java.lang.String">
+        SELECT region_code
+        FROM sys_region
+        WHERE region_name = #{name}
+          AND level = #{level}
+        ORDER BY id ASC
+        LIMIT 1
+    </select>
+
+    <!-- 按父级编码 + 中文名反查乡镇级区划编码 -->
+    <select id="selectChildCodeByParentAndName" resultType="java.lang.String">
+        SELECT region_code
+        FROM sys_region
+        WHERE parent_code = #{parentCode}
+          AND region_name = #{name}
+        ORDER BY id ASC
+        LIMIT 1
+    </select>
+
+</mapper>

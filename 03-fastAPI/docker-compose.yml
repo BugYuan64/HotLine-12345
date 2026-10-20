@@ -1,0 +1,29 @@
+# 一键启动 Redis-Stack（向量库）+ Python RAG 服务
+# 用法：docker compose up -d
+services:
+  redis-stack:
+    image: redis/redis-stack:latest
+    container_name: hotline-redis-stack
+    ports:
+      - "6379:6379"    # Redis 协议（含 RediSearch 向量检索模块）
+      - "8001:8001"    # RedisInsight 可视化控制台
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+  rag-service:
+    build: .
+    container_name: hotline-rag-service
+    ports:
+      - "8000:8000"
+    environment:
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}        # 阿里云 DashScope 密钥（.env）
+      - REDIS_HOST=redis-stack
+      - REDIS_PORT=6379
+      - AI_SIGN_SECRET=${AI_SIGN_SECRET:-hotline-ai-internal-sign-secret}
+    depends_on:
+      - redis-stack
+    restart: unless-stopped
+
+volumes:
+  redis-data:

@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.citizen.AppealParentMapper">
+
+    <sql id="baseColumns">
+        id, appeal_no, title, content, category,
+        citizen_name, citizen_phone, province, city, district, district_code, street, street_code, community,
+        address_detail, region, broad_flag, status, child_count, is_deleted,
+        create_time, update_time
+    </sql>
+
+    <select id="selectByNo" resultType="org.tjetc.backend.entity.citizen.AppealParent">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_parent
+        WHERE appeal_no = #{appealNo} AND is_deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.citizen.AppealParent">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_parent
+        WHERE id = #{id} AND is_deleted = 0
+        LIMIT 1
+    </select>
+
+    <select id="countByPrefix" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_parent
+        WHERE appeal_no LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+    <select id="countByStart" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_parent
+        WHERE create_time >= #{start}
+    </select>
+
+    <select id="selectPage" resultType="org.tjetc.backend.entity.citizen.AppealParent">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_parent
+        <where>
+            <if test="appealNo != null and appealNo != ''">AND appeal_no LIKE CONCAT('%', #{appealNo}, '%')</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+            AND is_deleted = 0
+        </where>
+        ORDER BY create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_parent
+        <where>
+            <if test="appealNo != null and appealNo != ''">AND appeal_no LIKE CONCAT('%', #{appealNo}, '%')</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+            AND is_deleted = 0
+        </where>
+    </select>
+
+    <!-- 拆分扫描：标题已生成（未拆分）的父诉求 -->
+    <select id="selectPendingParents" resultType="org.tjetc.backend.entity.citizen.AppealParent">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_parent
+        WHERE status = 'TITLE_GENERATED' AND is_deleted = 0
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 标题阶段扫描：待AI生成标题（TITLE_PENDING）+ 未拆分但标题为空（TITLE_GENERATED 且 title IS NULL）的父诉求 -->
+    <select id="selectPendingTitleParents" resultType="org.tjetc.backend.entity.citizen.AppealParent">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_parent
+        WHERE ((status = 'TITLE_PENDING'
+           OR (status = 'TITLE_GENERATED' AND (title IS NULL OR title = '')))
+          AND update_time &lt; DATE_SUB(NOW(), INTERVAL 30 SECOND))  <!-- 停留30s未处理才兜底（实时调度优先） -->
+          AND is_deleted = 0
+        ORDER BY create_time ASC
+        LIMIT #{limit}
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.citizen.AppealParent" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO appeal_parent (appeal_no, title, content, category,
+                                   citizen_name, citizen_phone, province, city, district, district_code, street, street_code, community,
+                                   address_detail, region, broad_flag, status)
+        VALUES (#{appealNo}, #{title}, #{content}, #{category},
+                #{citizenName}, #{citizenPhone}, #{province}, #{city}, #{district}, #{districtCode}, #{street}, #{streetCode}, #{community},
+                #{addressDetail}, #{region}, #{broadFlag}, #{status})
+    </insert>
+
+    <!-- 原子认领：PENDING_AI/TITLE_GENERATED 可置为 SPLITTING（拆分中），返回受影响行数，防并发/重复拆分；
+         is_deleted=0：防止"扫描后-认领前"被软删的记录仍进入流水线 -->
+    <update id="claimForSplit">
+        UPDATE appeal_parent
+        SET status = 'SPLITTING'
+        WHERE id = #{id} AND status IN ('PENDING_AI', 'TITLE_GENERATED') AND is_deleted = 0
+    </update>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.citizen.AppealParent">
+        UPDATE appeal_parent
+        <set>
+            <if test="title != null">title = #{title},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="category != null">category = #{category},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="citizenName != null">citizen_name = #{citizenName},</if>
+            <if test="citizenPhone != null">citizen_phone = #{citizenPhone},</if>
+            <if test="district != null">district = #{district},</if>
+            <if test="districtCode != null">district_code = #{districtCode},</if>
+            <if test="street != null">street = #{street},</if>
+            <if test="streetCode != null">street_code = #{streetCode},</if>
+            <if test="community != null">community = #{community},</if>
+            <if test="addressDetail != null">address_detail = #{addressDetail},</if>
+            <if test="region != null">region = #{region},</if>
+            <if test="broadFlag != null">broad_flag = #{broadFlag},</if>
+            <if test="childCount != null">child_count = #{childCount},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <!-- 软删除：保留历史数据，置 is_deleted=1；列表/查询统一过滤 is_deleted=0 -->
+    <update id="deleteById">
+        UPDATE appeal_parent
+        SET is_deleted = 1
+        WHERE id = #{id}
+    </update>
+
+    <!-- 公众端：按手机号分页查询诉求（办理进度列表 / 查看全部诉求）；appealNo 可空精确过滤 -->
+    <select id="selectPageByPhone" resultType="org.tjetc.backend.entity.citizen.AppealParent">
+        SELECT <include refid="baseColumns"/>
+        FROM appeal_parent
+        WHERE citizen_phone = #{phone} AND is_deleted = 0
+        <if test="appealNo != null and appealNo != ''">
+            AND appeal_no = #{appealNo}
+        </if>
+        ORDER BY create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPageByPhone" resultType="long">
+        SELECT COUNT(1)
+        FROM appeal_parent
+        WHERE citizen_phone = #{phone} AND is_deleted = 0
+        <if test="appealNo != null and appealNo != ''">
+            AND appeal_no = #{appealNo}
+        </if>
+    </select>
+
+</mapper>

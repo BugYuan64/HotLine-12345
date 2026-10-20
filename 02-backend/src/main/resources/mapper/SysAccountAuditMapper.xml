@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.SysAccountAuditMapper">
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.SysAccountAudit" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_account_audit (user_id, audit_status, apply_time)
+        VALUES (#{userId}, #{auditStatus}, #{applyTime})
+    </insert>
+
+    <select id="selectLatestRejectReason" resultType="string">
+        SELECT reject_reason
+        FROM sys_account_audit
+        WHERE user_id = #{userId} AND audit_status = 'REJECTED'
+        ORDER BY audit_time DESC
+        LIMIT 1
+    </select>
+
+    <!-- ==================== P1 账号审核管理（API 5.3/5.4/5.5/5.7） ==================== -->
+
+    <select id="selectPage" resultType="map">
+        SELECT a.id, u.name AS applicant_name, u.job_no, u.company, u.user_type, u.region, u.phone,
+               a.audit_status, a.reject_reason, a.apply_time, a.audit_time
+        FROM sys_account_audit a
+        JOIN sys_user u ON u.id = a.user_id AND u.is_deleted = 0
+        WHERE 1 = 1
+        <if test="status != null and status != ''">AND a.audit_status = #{status}</if>
+        <if test="name != null and name != ''">AND u.name LIKE CONCAT('%', #{name}, '%')</if>
+        <if test="jobNo != null and jobNo != ''">AND u.job_no = #{jobNo}</if>
+        ORDER BY a.apply_time DESC, a.id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM sys_account_audit a
+        JOIN sys_user u ON u.id = a.user_id AND u.is_deleted = 0
+        WHERE 1 = 1
+        <if test="status != null and status != ''">AND a.audit_status = #{status}</if>
+        <if test="name != null and name != ''">AND u.name LIKE CONCAT('%', #{name}, '%')</if>
+        <if test="jobNo != null and jobNo != ''">AND u.job_no = #{jobNo}</if>
+    </select>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.admin.SysAccountAudit">
+        SELECT id, user_id, audit_status, audit_user_id, audit_time, reject_reason, apply_time, create_time
+        FROM sys_account_audit
+        WHERE id = #{id}
+    </select>
+
+    <update id="updateAudit" parameterType="org.tjetc.backend.entity.admin.SysAccountAudit">
+        UPDATE sys_account_audit
+        SET audit_status = #{auditStatus},
+            audit_user_id = #{auditUserId},
+            audit_time = #{auditTime},
+            reject_reason = #{rejectReason}
+        WHERE id = #{id}
+    </update>
+
+</mapper>

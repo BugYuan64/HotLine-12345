@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.WarningRuleMapper">
+
+    <sql id="baseColumns">
+        id, rule_name, time_dimension, category, sub_category, region, county_code, street_code,
+        count_threshold, warning_level, push_targets, push_counties, push_categories, status, create_time
+    </sql>
+
+    <select id="selectAll" resultType="org.tjetc.backend.entity.admin.WarningRule">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_rule
+        ORDER BY create_time DESC, id DESC
+    </select>
+
+    <select id="selectEnabled" resultType="org.tjetc.backend.entity.admin.WarningRule">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_rule
+        WHERE status = 'ENABLED'
+        ORDER BY id
+    </select>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.admin.WarningRule">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_rule
+        WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.WarningRule" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO warning_rule (rule_name, time_dimension, category, sub_category, region, county_code, street_code,
+                                  count_threshold, warning_level, push_targets, push_counties, push_categories, status)
+        VALUES (#{ruleName}, #{timeDimension}, #{category}, #{subCategory}, #{region}, #{countyCode}, #{streetCode},
+                #{countThreshold}, #{warningLevel}, #{pushTargets}, #{pushCounties}, #{pushCategories}, #{status})
+    </insert>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.admin.WarningRule">
+        UPDATE warning_rule
+        SET rule_name = #{ruleName}, time_dimension = #{timeDimension}, category = #{category},
+            sub_category = #{subCategory},
+            region = #{region}, county_code = #{countyCode}, street_code = #{streetCode},
+            count_threshold = #{countThreshold},
+            warning_level = #{warningLevel}, push_targets = #{pushTargets},
+            push_counties = #{pushCounties}, push_categories = #{pushCategories}, status = #{status}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM warning_rule WHERE id = #{id}
+    </delete>
+
+</mapper>

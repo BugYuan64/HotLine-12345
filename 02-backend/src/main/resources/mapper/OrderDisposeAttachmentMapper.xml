@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.staff.OrderDisposeAttachmentMapper">
+
+    <sql id="baseColumns">
+        id, order_id, file_name, file_url, file_size, file_type, attachment_type,
+        upload_user_id, upload_time
+    </sql>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.staff.OrderDisposeAttachment" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO order_dispose_attachment (order_id, file_name, file_url, file_size, file_type,
+                                              attachment_type, upload_user_id)
+        VALUES (#{orderId}, #{fileName}, #{fileUrl}, #{fileSize}, #{fileType},
+                #{attachmentType}, #{uploadUserId})
+    </insert>
+
+    <select id="selectByOrderId" resultType="org.tjetc.backend.entity.staff.OrderDisposeAttachment">
+        SELECT <include refid="baseColumns"/>
+        FROM order_dispose_attachment
+        WHERE order_id = #{orderId}
+        ORDER BY id
+    </select>
+
+    <select id="countByOrderId" resultType="int">
+        SELECT COUNT(1) FROM order_dispose_attachment WHERE order_id = #{orderId}
+    </select>
+
+</mapper>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 部门端通知收件箱（dept_notice）：发布方扇出的部门级快照，含部门级已读状态 -->
+<mapper namespace="org.tjetc.backend.mapper.dept.DeptNoticeMapper">
+
+    <!-- 收到的通知（本部门展示中，行内带已读标记；匹配纯分类code历史行或「区县:分类」复合键，56部门口径） -->
+    <select id="selectReceived" resultType="org.tjetc.backend.dto.NoticeVO">
+        SELECT notice_id AS id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, dept_code, is_read, read_time, create_time
+        FROM dept_notice
+        WHERE dept_code IN (#{deptCode}, CONCAT(#{countyCode}, ':', #{deptCode})) AND status = 1
+        <if test="publisherType != null and publisherType != ''">AND publisher_type = #{publisherType}</if>
+        <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+        ORDER BY top_flag DESC, create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countReceived" resultType="long">
+        SELECT COUNT(1)
+        FROM dept_notice
+        WHERE dept_code IN (#{deptCode}, CONCAT(#{countyCode}, ':', #{deptCode})) AND status = 1
+        <if test="publisherType != null and publisherType != ''">AND publisher_type = #{publisherType}</if>
+        <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+    </select>
+
+    <!-- 详情（校验确实发给了本部门） -->
+    <select id="selectByNoticeAndDept" resultType="org.tjetc.backend.dto.NoticeVO">
+        SELECT notice_id AS id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, dept_code, is_read, read_time, create_time
+        FROM dept_notice
+        WHERE notice_id = #{noticeId}
+          AND dept_code IN (#{deptCode}, CONCAT(#{countyCode}, ':', #{deptCode}))
+        LIMIT 1
+    </select>
+
+    <!-- 点开详情置已读（部门级粒度，幂等） -->
+    <update id="markRead">
+        UPDATE dept_notice
+        SET is_read = 1, read_time = COALESCE(read_time, NOW())
+        WHERE notice_id = #{noticeId}
+          AND dept_code IN (#{deptCode}, CONCAT(#{countyCode}, ':', #{deptCode}))
+          AND is_read = 0
+    </update>
+
+    <!-- 未读徽章数（本部门展示中且未读） -->
+    <select id="countUnread" resultType="long">
+        SELECT COUNT(1) FROM dept_notice
+        WHERE dept_code IN (#{deptCode}, CONCAT(#{countyCode}, ':', #{deptCode}))
+          AND status = 1 AND is_read = 0
+    </select>
+
+    <delete id="deleteByNoticeId">
+        DELETE FROM dept_notice WHERE notice_id = #{noticeId}
+    </delete>
+
+    <update id="updateStatusByNoticeId">
+        UPDATE dept_notice SET status = #{status} WHERE notice_id = #{noticeId}
+    </update>
+
+    <!-- 发布方编辑联动：内容传播（保留已读状态） -->
+    <update id="propagateEdit">
+        UPDATE dept_notice
+        SET title = #{title}, content = #{content}, summary = #{summary}
+        WHERE notice_id = #{noticeId}
+    </update>
+
+    <!-- 目标移除（编辑时接收对象差异同步） -->
+    <delete id="deleteByNoticeAndCode">
+        DELETE FROM dept_notice WHERE notice_id = #{noticeId} AND dept_code = #{deptCode}
+    </delete>
+
+    <!-- 扇出新副本 -->
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.DeptNotice" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO dept_notice (notice_id, title, content, summary, publisher, publisher_type, publisher_dept,
+                                 top_flag, status, dept_code, is_read, create_time)
+        VALUES (#{noticeId}, #{title}, #{content}, #{summary}, #{publisher}, #{publisherType}, #{publisherDept},
+                #{topFlag}, #{status}, #{deptCode}, 0, #{createTime})
+    </insert>
+
+</mapper>

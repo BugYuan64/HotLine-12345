@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 管理端终审归档表（admin_order_archive）：快照由归档动作触发，整行镜像自 admin_work_order -->
+<mapper namespace="org.tjetc.backend.mapper.admin.AdminOrderArchiveMapper">
+
+    <!-- 整行拷贝（SQL 级镜像：含实体未映射的全部列），幂等：调用方先删除同 id 旧快照 -->
+    <insert id="copyFromAdmin">
+        INSERT INTO admin_order_archive
+        SELECT * FROM admin_work_order WHERE id = #{id}
+    </insert>
+
+    <delete id="deleteById">
+        DELETE FROM admin_order_archive WHERE id = #{id}
+    </delete>
+
+    <!-- 终审归档列表（终审归档页 archived=1 路由）：列与管理端工单分页同构 + 归档时间/完成标识/时间范围筛选 -->
+    <select id="selectPage" resultType="map">
+        SELECT id, order_no, title, content, category, sub_category, level, attention_count, event_type, confidence,
+               hit_keywords, need_review, region, department, street_office, status, is_overdue,
+               dispose_tag, create_time, close_time, archive_time, is_completed
+        FROM admin_order_archive
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="orderNo != null and orderNo != ''">AND order_no LIKE CONCAT('%', #{orderNo}, '%')</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="level != null and level != ''">AND level = #{level}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="startDate != null and startDate != ''">AND create_time &gt;= #{startDate}</if>
+        <!-- 时间段筛选：创建与完成（完成时间为空按归档时间口径）都在 [start,end] 内 -->
+        <if test="timeStart != null and timeStart != '' and timeEnd != null and timeEnd != ''">
+            AND create_time &gt;= #{timeStart} AND create_time &lt;= #{timeEnd}
+            AND COALESCE(close_time, archive_time) &gt;= #{timeStart}
+            AND COALESCE(close_time, archive_time) &lt;= #{timeEnd}
+        </if>
+        ORDER BY archive_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_order_archive
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="orderNo != null and orderNo != ''">AND order_no LIKE CONCAT('%', #{orderNo}, '%')</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        <if test="level != null and level != ''">AND level = #{level}</if>
+        <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+        <if test="status != null and status != ''">AND status = #{status}</if>
+        <if test="keyword != null and keyword != ''">AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))</if>
+        <if test="startDate != null and startDate != ''">AND create_time &gt;= #{startDate}</if>
+        <if test="timeStart != null and timeStart != '' and timeEnd != null and timeEnd != ''">
+            AND create_time &gt;= #{timeStart} AND create_time &lt;= #{timeEnd}
+            AND COALESCE(close_time, archive_time) &gt;= #{timeStart}
+            AND COALESCE(close_time, archive_time) &lt;= #{timeEnd}
+        </if>
+    </select>
+
+    <!-- 待终审工单列表（API 11.3.1 兼容路径）：归档工单只读列表 -->
+    <select id="selectFinalAuditing" resultType="map">
+        SELECT id, order_no, title AS summary, department, street_office, dispose_tag,
+               dept_audit_user_name, dept_audit_time, is_overdue, level, category,
+               sub_category, region, create_time, close_time, archive_time
+        FROM admin_order_archive
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+        ORDER BY archive_time DESC, id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countFinalAuditing" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_order_archive
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="streetOffice != null and streetOffice != ''">AND street_office = #{streetOffice}</if>
+        <if test="disposeTag != null and disposeTag != ''">AND dispose_tag = #{disposeTag}</if>
+        <if test="isOverdue != null">AND is_overdue = #{isOverdue}</if>
+    </select>
+
+    <!-- 归档数据列表（API 11.3.7） -->
+    <select id="selectArchives" resultType="map">
+        SELECT id, order_no, title AS summary, department, street_office, category, level,
+               archive_time, archive_type, close_time
+        FROM admin_order_archive
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="year != null and year != ''">AND YEAR(archive_time) = #{year}</if>
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+        ORDER BY archive_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countArchives" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_order_archive
+        WHERE is_deleted = 0 AND is_archived = 1
+        <if test="year != null and year != ''">AND YEAR(archive_time) = #{year}</if>
+        <if test="department != null and department != ''">AND category = #{department}</if>
+        <if test="category != null and category != ''">AND category = #{category}</if>
+    </select>
+
+</mapper>

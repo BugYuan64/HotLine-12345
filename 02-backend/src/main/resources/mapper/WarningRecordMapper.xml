@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.WarningRecordMapper">
+
+    <sql id="baseColumns">
+        id, warning_no, rule_id, warning_level, category, sub_category, region, county_code, county_name, street_code, street_name, address_detail, is_broad, department,
+        trigger_time, status, review_time, related_attention, ai_summary, measure, ref_cases,
+        respond_status, respond_time
+    </sql>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.WarningRecord" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO warning_record (warning_no, rule_id, warning_level, category, sub_category, region,
+                                    county_code, county_name, street_code, street_name, address_detail, is_broad,
+                                    department, trigger_time, status, review_time, related_attention,
+                                    ai_summary, measure, ref_cases, respond_status, respond_time)
+        VALUES (#{warningNo}, #{ruleId}, #{warningLevel}, #{category}, #{subCategory}, #{region},
+                #{countyCode}, #{countyName}, #{streetCode}, #{streetName}, #{addressDetail}, #{isBroad},
+                #{department}, #{triggerTime}, #{status}, #{reviewTime}, #{relatedAttention},
+                #{aiSummary}, #{measure}, #{refCases}, #{respondStatus}, #{respondTime})
+    </insert>
+
+    <update id="updateAiContent" parameterType="org.tjetc.backend.entity.admin.WarningRecord">
+        UPDATE warning_record
+        SET ai_summary = #{aiSummary}, measure = #{measure}, ref_cases = #{refCases}
+        WHERE id = #{id}
+    </update>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.admin.WarningRecord">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_record
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
+    <update id="updateStatus">
+        UPDATE warning_record
+        SET status = #{status}, review_time = #{reviewTime},
+            dept_sent_time = CASE WHEN #{status} = 'SENT' THEN #{reviewTime} ELSE dept_sent_time END
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateContent">
+        UPDATE warning_record
+        SET ai_summary = #{aiSummary}, measure = #{measure}
+        WHERE id = #{id}
+    </update>
+
+    <update id="updateRespond">
+        UPDATE warning_record
+        SET respond_status = 'RESPONDED', respond_time = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <!-- 街道办响应后同步主表：该预警全部分发街道办均已响应（无 UNRESPONDED 分发记录）才置主表已响应 -->
+    <update id="updateRespondIfAllDispatched">
+        UPDATE warning_record w
+        SET w.respond_status = 'RESPONDED', w.respond_time = NOW()
+        WHERE w.id = #{warningId}
+          AND NOT EXISTS (
+              SELECT 1 FROM warning_street_dispatch d
+              WHERE d.warning_id = w.id AND d.respond_status = 'UNRESPONDED'
+          )
+    </update>
+
+    <select id="selectUnhandledUrgentOlderThan" resultType="map">
+        SELECT id, warning_no, warning_level, category, sub_category, region
+        FROM warning_record
+        WHERE status = 'SENT'
+          AND respond_status = 'UNRESPONDED'
+          AND warning_level = 'URGENT'
+          AND trigger_time &lt;= #{threshold}
+    </select>
+
+    <!-- 管理端待办聚合：超时未响应紧急预警数（口径与升级扫描 selectUnhandledUrgentOlderThan 一致） -->
+    <select id="countUnhandledUrgentOlderThan" resultType="long">
+        SELECT COUNT(1)
+        FROM warning_record
+        WHERE status = 'SENT'
+          AND respond_status = 'UNRESPONDED'
+          AND warning_level = 'URGENT'
+          AND trigger_time &lt;= #{threshold}
+    </select>
+
+    <!-- 部门工作台待跟进预警数：口径与 selectStaffPage 部门过滤一致（已发送 + 归属本部门 + 未响应）
+         归属判定：department 含本分类code（全市）或「区县:分类」复合键（56部门口径，仅该区县可见） -->
+    <select id="countUnrespondedByDept" resultType="long">
+        SELECT COUNT(1)
+        FROM warning_record
+        WHERE status = 'SENT'
+          AND (FIND_IN_SET(#{dept}, department) > 0
+               OR FIND_IN_SET(CONCAT(#{countyCode}, ':', #{dept}), department) > 0)
+          AND respond_status = 'UNRESPONDED'
+    </select>
+
+    <select id="selectPage" resultType="map">
+        SELECT w.id, w.warning_no, w.rule_id, w.warning_level, w.category, w.sub_category, w.region,
+               w.county_name, w.department, w.trigger_time, w.status, w.review_time, w.related_attention,
+               w.ai_summary, w.measure, w.ref_cases, w.respond_status, w.respond_time,
+               r.rule_name AS rule_name
+        FROM warning_record w
+        LEFT JOIN warning_rule r ON w.rule_id = r.id
+        <where>
+            <if test="warningLevel != null and warningLevel != ''">AND w.warning_level = #{warningLevel}</if>
+            <if test="category != null and category != ''">AND w.category = #{category}</if>
+            <if test="region != null and region != ''">AND w.region = #{region}</if>
+            <if test="status != null and status != ''">AND w.status = #{status}</if>
+            <if test="startTime != null">AND w.trigger_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND w.trigger_time &lt;= #{endTime}</if>
+        </where>
+        ORDER BY CASE WHEN w.status = 'PENDING' AND w.warning_level = 'URGENT' THEN 0 ELSE 1 END,
+                 w.trigger_time DESC, w.id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM warning_record
+        <where>
+            <if test="warningLevel != null and warningLevel != ''">AND warning_level = #{warningLevel}</if>
+            <if test="category != null and category != ''">AND category = #{category}</if>
+            <if test="region != null and region != ''">AND region = #{region}</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+            <if test="startTime != null">AND trigger_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND trigger_time &lt;= #{endTime}</if>
+        </where>
+    </select>
+
+    <select id="selectStaffPage" resultType="map">
+        SELECT w.id, w.warning_no, w.rule_id, w.warning_level, w.category, w.sub_category, w.region,
+               w.county_name, w.department, w.trigger_time, w.status, w.review_time, w.related_attention,
+               w.ai_summary, w.measure, w.ref_cases, w.respond_status, w.respond_time,
+               r.rule_name AS rule_name
+        FROM warning_record w
+        LEFT JOIN warning_rule r ON w.rule_id = r.id
+        WHERE w.status = 'SENT'
+        <if test="dept != null and dept != ''">
+            AND (FIND_IN_SET(#{dept}, w.department) > 0
+                 OR FIND_IN_SET(CONCAT(#{countyCode}, ':', #{dept}), w.department) > 0)
+        </if>
+        <if test="subCategory != null and subCategory != ''">AND w.sub_category = #{subCategory}</if>
+        <if test="warningLevel != null and warningLevel != ''">AND w.warning_level = #{warningLevel}</if>
+        <if test="region != null and region != ''">AND w.region = #{region}</if>
+        <if test="startTime != null">AND w.trigger_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND w.trigger_time &lt;= #{endTime}</if>
+        ORDER BY w.trigger_time DESC, w.id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countStaffPage" resultType="long">
+        SELECT COUNT(1)
+        FROM warning_record w
+        WHERE w.status = 'SENT'
+        <if test="dept != null and dept != ''">
+            AND (FIND_IN_SET(#{dept}, w.department) > 0
+                 OR FIND_IN_SET(CONCAT(#{countyCode}, ':', #{dept}), w.department) > 0)
+        </if>
+        <if test="subCategory != null and subCategory != ''">AND w.sub_category = #{subCategory}</if>
+        <if test="warningLevel != null and warningLevel != ''">AND w.warning_level = #{warningLevel}</if>
+        <if test="region != null and region != ''">AND w.region = #{region}</if>
+        <if test="startTime != null">AND w.trigger_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND w.trigger_time &lt;= #{endTime}</if>
+    </select>
+
+    <!-- 街道办端局部预警（本辖区数据隔离）：仅分发给本街道（street_office = 账号辖区）的已发送预警；响应字段取分发记录 -->
+    <select id="selectStreetPage" resultType="map">
+        SELECT w.id, w.warning_no, w.rule_id, w.warning_level, w.category, w.sub_category, w.region,
+               w.county_name, w.department, w.trigger_time, w.status, w.review_time, w.related_attention,
+               w.ai_summary, w.measure, w.ref_cases,
+               d.respond_status AS respond_status, d.respond_time AS respond_time,
+               d.dispatch_time AS dispatch_time,
+               r.rule_name AS rule_name
+        FROM warning_street_dispatch d
+        JOIN warning_record w ON w.id = d.warning_id
+        LEFT JOIN warning_rule r ON w.rule_id = r.id
+        WHERE w.status = 'SENT'
+          AND d.street_office = #{streetOffice}
+        <if test="subCategory != null and subCategory != ''">AND w.sub_category = #{subCategory}</if>
+        <if test="warningLevel != null and warningLevel != ''">AND w.warning_level = #{warningLevel}</if>
+        <if test="region != null and region != ''">AND (w.region = #{region} OR w.county_name = #{region})</if>
+        <if test="startTime != null">AND w.trigger_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND w.trigger_time &lt;= #{endTime}</if>
+        ORDER BY w.trigger_time DESC, w.id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countStreetPage" resultType="long">
+        SELECT COUNT(1)
+        FROM warning_street_dispatch d
+        JOIN warning_record w ON w.id = d.warning_id
+        WHERE w.status = 'SENT'
+          AND d.street_office = #{streetOffice}
+        <if test="subCategory != null and subCategory != ''">AND w.sub_category = #{subCategory}</if>
+        <if test="warningLevel != null and warningLevel != ''">AND w.warning_level = #{warningLevel}</if>
+        <if test="region != null and region != ''">AND (w.region = #{region} OR w.county_name = #{region})</if>
+        <if test="startTime != null">AND w.trigger_time &gt;= #{startTime}</if>
+        <if test="endTime != null">AND w.trigger_time &lt;= #{endTime}</if>
+    </select>
+
+    <select id="countByRuleToday" resultType="int">
+        SELECT COUNT(1)
+        FROM warning_record
+        WHERE rule_id = #{ruleId} AND trigger_time &gt;= #{dayStart}
+    </select>
+
+    <select id="countByPrefix" resultType="int">
+        SELECT COUNT(1)
+        FROM warning_record
+        WHERE warning_no LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+</mapper>

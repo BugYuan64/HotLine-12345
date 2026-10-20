@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 管理端公告主表（admin_notice）：全量权威，所有端发布的公告均落本表 -->
+<mapper namespace="org.tjetc.backend.mapper.admin.AdminNoticeMapper">
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.common.Notice">
+        SELECT id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, create_time, update_time
+        FROM admin_notice
+        WHERE id = #{id}
+    </select>
+
+    <select id="selectPage" resultType="org.tjetc.backend.entity.common.Notice">
+        SELECT id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, create_time, update_time
+        FROM admin_notice
+        <where>
+            <if test="title != null and title != ''">AND title LIKE CONCAT('%', #{title}, '%')</if>
+            <if test="keyword != null and keyword != ''">
+                AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="status != null">AND status = #{status}</if>
+            <if test="publisherType != null and publisherType != ''">AND publisher_type = #{publisherType}</if>
+            <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+            <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+        </where>
+        ORDER BY top_flag DESC, create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_notice
+        <where>
+            <if test="title != null and title != ''">AND title LIKE CONCAT('%', #{title}, '%')</if>
+            <if test="keyword != null and keyword != ''">
+                AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="status != null">AND status = #{status}</if>
+            <if test="publisherType != null and publisherType != ''">AND publisher_type = #{publisherType}</if>
+            <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+            <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+        </where>
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.Notice" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO admin_notice (title, content, summary, publisher, publisher_type, publisher_dept,
+                                  top_flag, status, create_time, update_time)
+        VALUES (#{title}, #{content}, #{summary}, #{publisher}, #{publisherType}, #{publisherDept},
+                #{topFlag}, #{status}, #{createTime}, #{updateTime})
+    </insert>
+
+    <!-- 动态更新（仅非空字段）：编辑/下架/重发共用 -->
+    <update id="update" parameterType="org.tjetc.backend.entity.common.Notice">
+        UPDATE admin_notice
+        <set>
+            <if test="title != null">title = #{title},</if>
+            <if test="content != null">content = #{content},</if>
+            <if test="summary != null">summary = #{summary},</if>
+            <if test="topFlag != null">top_flag = #{topFlag},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="createTime != null">create_time = #{createTime},</if>
+            update_time = NOW()
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM admin_notice WHERE id = #{id}
+    </delete>
+
+    <!-- 按发布者查已发公告：部门端（DEPT+code）/ 街道办端（STREET，dept 为 NULL） -->
+    <select id="selectPublishedByPublisher" resultType="org.tjetc.backend.entity.common.Notice">
+        SELECT id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, create_time, update_time
+        FROM admin_notice
+        <where>
+            publisher_type = #{publisherType}
+            <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+            <if test="publisherDept == null">AND publisher_dept IS NULL</if>
+            <if test="keyword != null and keyword != ''">
+                AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+        </where>
+        ORDER BY top_flag DESC, create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPublishedByPublisher" resultType="long">
+        SELECT COUNT(1)
+        FROM admin_notice
+        <where>
+            publisher_type = #{publisherType}
+            <if test="publisherDept != null and publisherDept != ''">AND publisher_dept = #{publisherDept}</if>
+            <if test="publisherDept == null">AND publisher_dept IS NULL</if>
+            <if test="keyword != null and keyword != ''">
+                AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="startTime != null">AND create_time &gt;= #{startTime}</if>
+            <if test="endTime != null">AND create_time &lt; #{endTime}</if>
+        </where>
+    </select>
+
+    <!-- 目标重构（读三端收件箱表：编辑回填/接收对象摘要；管理端监督视角跨端只读） -->
+    <select id="selectTargetDeptCodes" resultType="string">
+        SELECT DISTINCT dept_code FROM dept_notice WHERE notice_id = #{noticeId} ORDER BY dept_code
+    </select>
+
+    <select id="selectTargetStreetNames" resultType="string">
+        SELECT DISTINCT street_name FROM street_notice WHERE notice_id = #{noticeId} ORDER BY street_name
+    </select>
+
+    <select id="countCitizenCopy" resultType="long">
+        SELECT COUNT(1) FROM citizen_notice WHERE notice_id = #{noticeId}
+    </select>
+
+</mapper>

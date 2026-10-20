@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.common.SysFileMapper">
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.common.SysFile">
+        SELECT id, biz_type, order_id, appeal_id, file_name, file_url, file_size, file_type, upload_user_id, upload_time
+        FROM sys_file
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
+    <!-- 诉求附件：按父诉求ID查附件（市民提交时上传） -->
+    <select id="selectByAppealId" resultType="org.tjetc.backend.entity.common.SysFile">
+        SELECT id, biz_type, order_id, appeal_id, file_name, file_url, file_size, file_type, upload_user_id, upload_time
+        FROM sys_file
+        WHERE appeal_id = #{appealId}
+        ORDER BY id ASC
+    </select>
+
+    <update id="updateAppealId">
+        UPDATE sys_file
+        SET appeal_id = #{appealId}
+        WHERE id = #{id} AND appeal_id IS NULL
+    </update>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.SysFile" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO sys_file (biz_type, order_id, appeal_id, file_name, file_url, file_size, file_type, upload_user_id)
+        VALUES (#{bizType}, #{orderId}, #{appealId}, #{fileName}, #{fileUrl}, #{fileSize}, #{fileType}, #{uploadUserId})
+    </insert>
+
+</mapper>

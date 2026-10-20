@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.common.NotificationSettingsMapper">
+
+    <select id="selectByPhone" resultType="org.tjetc.backend.entity.common.NotificationSettings">
+        SELECT id, phone, sms_enabled AS smsEnabled
+        FROM notification_settings
+        WHERE phone = #{phone}
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.NotificationSettings" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO notification_settings (phone, sms_enabled)
+        VALUES (#{phone}, #{smsEnabled})
+    </insert>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.common.NotificationSettings">
+        UPDATE notification_settings
+        SET sms_enabled = #{smsEnabled}
+        WHERE phone = #{phone}
+    </update>
+
+    <delete id="deleteByPhone">
+        DELETE FROM notification_settings WHERE phone = #{phone}
+    </delete>
+
+</mapper>

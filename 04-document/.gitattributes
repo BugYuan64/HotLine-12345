@@ -1,0 +1,29 @@
+# 04-document：文档与 SQL 脚本
+# 所有文本文件自动处理换行符（检出时转 CRLF，提交时转 LF）
+* text=auto
+
+# 文本文件强制 LF
+*.md   text eol=lf
+*.sql  text eol=lf
+*.txt  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+
+# Git 配置文件
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+
+# 二进制文件（不转换换行符，不 diff）
+*.docx binary
+*.doc  binary
+*.pdf  binary
+*.xlsx binary
+*.xls  binary
+*.pptx binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.zip  binary
+*.gz   binary

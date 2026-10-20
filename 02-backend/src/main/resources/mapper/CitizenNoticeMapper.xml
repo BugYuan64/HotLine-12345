@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- 市民端 Mapper：citizen_notice 公开通知（只接收） + citizen_appeal 诉求提交记录（独立落库） -->
+<mapper namespace="org.tjetc.backend.mapper.citizen.CitizenNoticeMapper">
+
+    <!-- 公开通知分页（市民端首页，status=1，置顶优先；keyword 标题/正文/摘要模糊匹配） -->
+    <select id="selectPublicPage" resultType="org.tjetc.backend.entity.common.Notice">
+        SELECT notice_id AS id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, create_time
+        FROM citizen_notice
+        WHERE status = 1
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+        ORDER BY top_flag DESC, create_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPublic" resultType="long">
+        SELECT COUNT(1) FROM citizen_notice WHERE status = 1
+        <if test="keyword != null and keyword != ''">
+            AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%') OR summary LIKE CONCAT('%', #{keyword}, '%'))
+        </if>
+    </select>
+
+    <select id="selectPublicTop" resultType="org.tjetc.backend.entity.common.Notice">
+        SELECT notice_id AS id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, create_time
+        FROM citizen_notice
+        WHERE status = 1
+        ORDER BY top_flag DESC, create_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectByNoticeId" resultType="org.tjetc.backend.entity.common.CitizenNotice">
+        SELECT notice_id AS id, title, content, summary, publisher, publisher_type, publisher_dept,
+               top_flag, status, create_time
+        FROM citizen_notice
+        WHERE notice_id = #{noticeId}
+        LIMIT 1
+    </select>
+
+    <delete id="deleteByNoticeId">
+        DELETE FROM citizen_notice WHERE notice_id = #{noticeId}
+    </delete>
+
+    <update id="updateStatusByNoticeId">
+        UPDATE citizen_notice SET status = #{status} WHERE notice_id = #{noticeId}
+    </update>
+
+    <update id="propagateEdit">
+        UPDATE citizen_notice
+        SET title = #{title}, content = #{content}, summary = #{summary}
+        WHERE notice_id = #{noticeId}
+    </update>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.common.CitizenNotice" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO citizen_notice (notice_id, title, content, summary, publisher, publisher_type, publisher_dept,
+                                    top_flag, status, create_time)
+        VALUES (#{noticeId}, #{title}, #{content}, #{summary}, #{publisher}, #{publisherType}, #{publisherDept},
+                #{topFlag}, #{status}, #{createTime})
+    </insert>
+
+    <!-- 市民诉求提交记录：独立落库（与 appeal_parent 同事务写入） -->
+    <insert id="insertAppeal" parameterType="org.tjetc.backend.entity.common.CitizenAppeal" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO citizen_appeal (appeal_no, parent_id, citizen_user_id, citizen_name, citizen_phone,
+                                    title, content, province, city, district, street, community, address_detail,
+                                    broad_flag, submit_time)
+        VALUES (#{appealNo}, #{parentId}, #{citizenUserId}, #{citizenName}, #{citizenPhone},
+                #{title}, #{content}, #{province}, #{city}, #{district}, #{street}, #{community}, #{addressDetail},
+                #{broadFlag}, #{submitTime})
+    </insert>
+
+    <!-- 本市民的提交记录（"我的诉求"独立数据源） -->
+    <select id="selectAppealsByPhone" resultType="org.tjetc.backend.entity.common.CitizenAppeal">
+        SELECT id, appeal_no, parent_id, citizen_user_id, citizen_name, citizen_phone,
+               title, content, province, city, district, street, community, address_detail,
+               broad_flag, submit_time
+        FROM citizen_appeal
+        WHERE citizen_phone = #{citizenPhone}
+        ORDER BY submit_time DESC
+    </select>
+
+</mapper>

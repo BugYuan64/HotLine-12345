@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="org.tjetc.backend.mapper.admin.WarningCaseMapper">
+
+    <sql id="baseColumns">
+        id, case_no, title, category, sub_category, region, county_code, county_name, street_code, street_name, content,
+        measure_plan, measure_result, source, status, vector_id, create_time
+    </sql>
+
+    <!-- 分页查询：按标题/内容关键词、分类、辖区、状态筛选，前端列表展示 -->
+    <select id="selectPage" resultType="map">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_case
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="category != null and category != ''">AND category = #{category}</if>
+            <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+        </where>
+        ORDER BY id DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <select id="countPage" resultType="long">
+        SELECT COUNT(1)
+        FROM warning_case
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (title LIKE CONCAT('%', #{keyword}, '%') OR content LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="category != null and category != ''">AND category = #{category}</if>
+            <if test="region != null and region != ''">AND region LIKE CONCAT(#{region}, '%')</if>
+            <if test="status != null and status != ''">AND status = #{status}</if>
+        </where>
+    </select>
+
+    <select id="selectById" resultType="org.tjetc.backend.entity.admin.WarningCase">
+        SELECT <include refid="baseColumns"/>
+        FROM warning_case
+        WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="org.tjetc.backend.entity.admin.WarningCase" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO warning_case (case_no, title, category, sub_category, region, county_code, county_name, street_code, street_name, content,
+                                  measure_plan, measure_result, source, status, vector_id)
+        VALUES (#{caseNo}, #{title}, #{category}, #{subCategory}, #{region}, #{countyCode}, #{countyName}, #{streetCode}, #{streetName}, #{content},
+                #{measurePlan}, #{measureResult}, #{source}, #{status}, #{vectorId})
+    </insert>
+
+    <update id="update" parameterType="org.tjetc.backend.entity.admin.WarningCase">
+        UPDATE warning_case
+        SET title = #{title}, category = #{category}, sub_category = #{subCategory},
+            region = #{region}, county_code = #{countyCode}, county_name = #{countyName},
+            street_code = #{streetCode}, street_name = #{streetName},
+            content = #{content}, measure_plan = #{measurePlan},
+            measure_result = #{measureResult}, status = #{status}, vector_id = #{vectorId}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM warning_case WHERE id = #{id}
+    </delete>
+
+    <select id="countByPrefix" resultType="int">
+        SELECT COUNT(1)
+        FROM warning_case
+        WHERE case_no LIKE CONCAT(#{prefix}, '%')
+    </select>
+
+</mapper>
